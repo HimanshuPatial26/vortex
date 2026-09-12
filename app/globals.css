@@ -21,3 +21,29 @@ body { margin: 0; background: #06070C; }
 @media (max-width: 620px) {
   .hv-foot > span:last-child { display: none; }
 }
+
+/* ── LightRays ── */
+/* Only opacity and transform animate, so the fan stays on the compositor.
+   Each beam carries its own resting angle in --ray-angle. */
+@keyframes hv-ray-breathe {
+  0%, 100% {
+    opacity: 0.45;
+    transform: rotate(var(--ray-angle)) scaleX(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(calc(var(--ray-angle) + 1.8deg)) scaleX(1.22);
+  }
+}
+
+.hv-ray {
+  animation-name: hv-ray-breathe;
+  animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  animation-iteration-count: infinite;
+  will-change: opacity, transform;
+}
+
+/* The fan still lights the section, it just stops moving. */
+@media (prefers-reduced-motion: reduce) {
+  .hv-ray { animation: none; opacity: 0.7; }
+}
