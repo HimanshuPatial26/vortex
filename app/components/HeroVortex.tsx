@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import { useCallback } from "react";
 import { useAdvanceScroll } from "./useAdvanceScroll";
 import LightRays from "./LightRays";
+import ScanOverlay from "./ScanOverlay";
 import { color, font } from "../theme";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -74,6 +75,12 @@ export interface HeroVortexProps {
   lightRays?: boolean;
   /** Scales the beams' opacity. */
   lightRaysIntensity?: number;
+  /** Draw the computer-vision scan geometry over the sculpture. */
+  scanOverlay?: boolean;
+  /** How many anchor nodes ring the object. */
+  scanNodeCount?: number;
+  /** Master opacity of the scan geometry. */
+  scanOpacity?: number;
   style?: CSSProperties;
 }
 
@@ -157,6 +164,9 @@ export default function HeroVortex({
   renderCanvas = true,
   lightRays = true,
   lightRaysIntensity = 1,
+  scanOverlay = true,
+  scanNodeCount = 22,
+  scanOpacity = 0.62,
   style,
 }: HeroVortexProps) {
   const advance = useAdvanceScroll(advanceToId, advanceDuration);
@@ -190,6 +200,17 @@ export default function HeroVortex({
       {/* Directional light, replacing the old centred key light: it comes from
           one corner, so the sculpture is lit across rather than haloed. */}
       {lightRays && <LightRays intensity={lightRaysIntensity} from="top right" />}
+
+      {/* Measurement geometry over the sculpture. Fixed to the viewport like
+          the canvas it annotates, and fades as the hero scrolls away. */}
+      {scanOverlay && (
+        <ScanOverlay
+          nodeCount={scanNodeCount}
+          opacity={scanOpacity}
+          color={color.textDim}
+          accentColor={color.accentLight}
+        />
+      )}
 
       {/* The sculpture. Sized to the section so the vitrine breathes on tall
           viewports and still clears the copy on short ones. */}

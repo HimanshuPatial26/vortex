@@ -100,6 +100,45 @@ particle: under additive blending, neighbouring points carrying different hues
 sum straight back to grey. And the sweep is clamped rather than wrapped with
 `fract`, which would put a hard seam where pale meets blue.
 
+## The scan overlay
+
+`ScanOverlay` draws a computer-vision read-out over the sculpture: anchor nodes
+just outside its silhouette, chained into an irregular polygon, callipers
+spanning it at a few heights, corner brackets on the bounding box, scale ticks
+down both edges, and coordinate labels on a handful of nodes. A slow sweep
+passes down the box and brightens the nodes it crosses; the node nearest the
+cursor takes a focus mark and its read-out goes accent-coloured.
+
+SVG, not WebGL. The lines have to stay hairline-crisp at any DPR and the labels
+are real text — both of which the DOM does for free and a shader turns into a
+project. It costs about thirty nodes' worth of attribute writes per frame.
+
+Two things it has to get right:
+
+**It is fixed to the viewport, not flowed with the hero.** The sculpture is
+drawn on a fixed canvas, so an overlay anchored in the document would slide off
+the object the moment the page scrolled. It fades over the first half-viewport
+instead.
+
+**Its envelope follows the scene's own fit rule.** The sculpture fits by height
+on a wide viewport and by width on a narrow one, and an envelope measured in
+height units alone leaves the overlay hanging off both edges of a phone. Below
+aspect 0.679 it shrinks with the scene, about the object's centre rather than
+the top of the frame, and the labels drop out under 560px where there is no room
+outboard for them.
+
+| `HeroVortex` prop | Default | What it does |
+| --- | --- | --- |
+| `scanOverlay` | `true` | Draw the scan geometry. |
+| `scanNodeCount` | `22` | Anchor nodes around the object. |
+| `scanOpacity` | `0.62` | Master opacity. |
+
+`ScanOverlay` itself also takes `color`, `accentColor` and `labels`. The
+silhouette it hugs is the `PROFILE` table at the top of the file — half-width
+against height, sampled off a render and smoothed. It is an envelope, not a
+trace: the column is irregular and animated, and measurement geometry belongs
+just outside the subject anyway.
+
 ## Carrying the field between sections
 
 `VortexScene` puts one canvas, fixed to the viewport, behind every section it
