@@ -102,26 +102,35 @@ sum straight back to grey. And the sweep is clamped rather than wrapped with
 
 ## The scan overlay
 
-`ScanOverlay` draws a computer-vision read-out over the sculpture: anchor nodes
-just outside its silhouette, chained into an irregular polygon, callipers
-spanning it at a few heights, corner brackets on the bounding box, scale ticks
-down both edges, and coordinate labels on a handful of nodes. A slow sweep
-passes down the box and brightens the nodes it crosses; nodes fire acquisition
-blips on their own staggered cycles, a couple lit at any moment; and the node
-nearest the cursor takes a focus mark while nodes around it give ground and
-drift back as it leaves.
+`ScanOverlay` puts technical measurement marks in the field around the
+sculpture. Straight segments only, and no closed shapes — the object is never
+ringed or boxed. A few marks reach in to take a width off the silhouette; the
+rest hold station in the margins, so the centre of the frame stays the
+object's. Micro-detail comes from anchor dots, small square markers,
+perpendicular measurement ticks, dotted guide fragments and sparse numeric
+read-outs.
 
-SVG, not WebGL. The lines have to stay hairline-crisp at any DPR and the labels
-are real text — both of which the DOM does for free and a shader turns into a
-project. It costs about thirty nodes' worth of attribute writes per frame.
+**The layout is authored, not generated.** Random placement reads as scatter;
+what makes an instrument look intelligent is that nothing is mirrored, no two
+lengths match, and the spacing is uneven but deliberate. The `MARKS` table at
+the top of the file is that composition, kept clear of the hero's own HUD
+columns on both sides.
 
-The ring's topology is fixed at build, not re-sorted per frame. Sorting live
-means two nodes that drift past each other swap places in the chain and the
-polygon snaps to a new shape mid-motion. Fixing it is what lets the nodes move,
-and be shoved around by the cursor, while the structure they form stays the
-same.
+Each mark runs its own slow cycle — draw on with an ease-out, hold, fade,
+repeat — with a gentle breath across the held span and an acquisition blip on
+its cap. Offsets are scattered so only two or three of the twenty are ever in
+transition: the field should read as being re-measured, not as blinking.
+Measured across a spread of samples, that holds at 0–2 changing at a time.
 
-Two more things it has to get right:
+This is why each mark owns a path instead of being batched into a shared one.
+Batching is cheaper, but a mark in a shared path cannot fade on its own, and
+independent coming and going is the whole effect.
+
+Nodes near the cursor give a little ground and settle back as it leaves, and the
+whole rig leans a few pixels with the cursor the way the sculpture parallaxes,
+so the marks read as sitting in the scene with it.
+
+Two things it has to get right:
 
 **It is fixed to the viewport, not flowed with the hero.** The sculpture is
 drawn on a fixed canvas, so an overlay anchored in the document would slide off
@@ -129,23 +138,17 @@ the object the moment the page scrolled. It fades over the first half-viewport
 instead.
 
 **Its envelope follows the scene's own fit rule.** The sculpture fits by height
-on a wide viewport and by width on a narrow one, and an envelope measured in
-height units alone leaves the overlay hanging off both edges of a phone. Below
-aspect 0.679 it shrinks with the scene, about the object's centre rather than
-the top of the frame, and the labels drop out under 560px where there is no room
-outboard for them.
+on a wide viewport and by width on a narrow one; an envelope in height units
+alone leaves the edge marks hanging in space on a phone. Below aspect 0.679 it
+shrinks with the scene. The margin bands the field marks occupy do not exist
+under 760px, so those drop out, and the labels go under 620px.
 
 | `HeroVortex` prop | Default | What it does |
 | --- | --- | --- |
-| `scanOverlay` | `true` | Draw the scan geometry. |
-| `scanNodeCount` | `22` | Anchor nodes around the object. |
-| `scanOpacity` | `0.62` | Master opacity. |
+| `scanOverlay` | `true` | Draw the marks. |
+| `scanOpacity` | `0.7` | Master opacity. |
 
-`ScanOverlay` itself also takes `color`, `accentColor` and `labels`. The
-silhouette it hugs is the `PROFILE` table at the top of the file — half-width
-against height, sampled off a render and smoothed. It is an envelope, not a
-trace: the column is irregular and animated, and measurement geometry belongs
-just outside the subject anyway.
+`ScanOverlay` itself also takes `color`, `accentColor` and `labels`.
 
 ## Carrying the field between sections
 

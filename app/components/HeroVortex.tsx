@@ -77,8 +77,6 @@ export interface HeroVortexProps {
   lightRaysIntensity?: number;
   /** Draw the computer-vision scan geometry over the sculpture. */
   scanOverlay?: boolean;
-  /** How many anchor nodes ring the object. */
-  scanNodeCount?: number;
   /** Master opacity of the scan geometry. */
   scanOpacity?: number;
   style?: CSSProperties;
@@ -165,8 +163,7 @@ export default function HeroVortex({
   lightRays = true,
   lightRaysIntensity = 1,
   scanOverlay = true,
-  scanNodeCount = 22,
-  scanOpacity = 0.62,
+  scanOpacity = 0.7,
   style,
 }: HeroVortexProps) {
   const advance = useAdvanceScroll(advanceToId, advanceDuration);
@@ -205,7 +202,6 @@ export default function HeroVortex({
           the canvas it annotates, and fades as the hero scrolls away. */}
       {scanOverlay && (
         <ScanOverlay
-          nodeCount={scanNodeCount}
           opacity={scanOpacity}
           color={color.textDim}
           accentColor={color.accentLight}

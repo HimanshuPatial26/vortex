@@ -1,30 +1,37 @@
 "use client";
 
-/* ScanOverlay — a computer-vision read-out drawn over the sculpture.
+/* ScanOverlay — technical measurement marks in the field around the sculpture.
 
-   Anchor nodes sit just outside the object's silhouette, chained into an
-   irregular polygon and crossed by a few chords, with corner brackets marking
-   the bounding box and coordinate labels on a handful of nodes. The intent is a
-   system measuring the object, so the geometry is sparse and deliberate rather
-   than a lattice: every line either follows the outline or spans it.
+   Straight segments only, and no closed shapes: the object is never ringed or
+   boxed. Marks sit in the outer band — a few reaching in toward the silhouette
+   to take a width, the rest holding station in the margins — so the centre of
+   the frame stays the object's.
 
-   SVG, not WebGL. The lines have to stay hairline-crisp at any DPR and the
-   labels are real text, both of which the DOM does for free and a shader makes
-   into a project. The cost is ~30 nodes' worth of attribute writes per frame,
-   which is nothing.
+   The layout is authored rather than generated. Random placement reads as
+   scatter; what makes an instrument look intelligent is that nothing is
+   mirrored, lengths never repeat, and the spacing is uneven but deliberate. The
+   table below is that composition, and it is kept clear of the hero's own HUD
+   columns on both sides.
 
-   Fixed to the viewport rather than flowing with the hero, because the
-   sculpture it annotates is drawn on a fixed canvas — anchored in the document
-   instead, the overlay would slide off the object the moment the page scrolled.
-   It fades out over the first half-viewport of scroll instead. */
+   SVG, not WebGL. Hairline strokes have to stay crisp at any DPR and the labels
+   are real text — both free in the DOM, both a project in a shader.
+
+   Each mark owns a path rather than being batched into a shared one, because
+   each runs its own slow cycle: draw on, hold, fade, repeat. Offsets are
+   scattered so only two or three are ever in transition — the field should read
+   as being re-measured, not as blinking.
+
+   Fixed to the viewport rather than flowed with the hero, because the sculpture
+   it annotates is drawn on a fixed canvas — anchored in the document, the marks
+   would slide off the object the moment the page scrolled. They fade over the
+   first half-viewport instead. */
 
 import { useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 
 /* Half-width of the sculpture against height, sampled off a render and
-   smoothed. The column is irregular and animated, so this is an envelope, not
-   a trace — which is right for the effect: measurement geometry belongs just
-   outside the subject, not painted onto it. */
+   smoothed. An envelope, not a trace: the column is irregular and animated, and
+   measurement geometry belongs just outside the subject anyway. */
 const PROFILE: Array<[number, number]> = [
   [0.10, 0.19],
   [0.18, 0.25],
@@ -37,7 +44,6 @@ const PROFILE: Array<[number, number]> = [
   [0.72, 0.05],
 ];
 
-/** Half-width at a given height fraction, linearly blended between samples. */
 const envelope = (y: number): number => {
   if (y <= PROFILE[0][0]) return PROFILE[0][1];
   const last = PROFILE[PROFILE.length - 1];
@@ -53,66 +59,76 @@ const envelope = (y: number): number => {
   return last[1];
 };
 
-/* Deterministic, so the server and the first client render agree — the nodes
-   are laid out at mount, not randomised per frame. */
+type Cap = "dot" | "square" | "none";
+
+interface Mark {
+  /** "edge" starts at the silhouette and reaches outward; "field" is placed in
+   *  viewport coordinates and holds station. */
+  kind: "edge" | "field";
+  /** edge: height fraction on the profile. field: x as a fraction of width. */
+  a: number;
+  /** edge: -1 left of the object, +1 right. field: y as a fraction of height. */
+  b: number;
+  /** Length as a fraction of the smaller viewport dimension. */
+  len: number;
+  /** Degrees clockwise from pointing right. Ignored for edge marks, which
+   *  always run horizontally away from the object. */
+  angle?: number;
+  dotted?: boolean;
+  cap?: Cap;
+  /** Perpendicular measurement ticks spaced along the segment. */
+  ticks?: number;
+  label?: string;
+  /** Relative weight; the composition needs a few marks to sit back. */
+  op?: number;
+}
+
+/* The composition. Deliberately asymmetric — no height is used twice, no two
+   lengths match, and the two sides carry different counts. Field marks live in
+   x 0.19–0.31 and 0.69–0.83, the clear bands between the hero's HUD columns
+   and the object itself. */
+const MARKS: Mark[] = [
+  // Reaching in to the silhouette. Uneven, and not mirrored across the axis.
+  { kind: "edge", a: 0.148, b: 1, len: 0.104, cap: "dot", label: "0.318" },
+  { kind: "edge", a: 0.212, b: -1, len: 0.059, cap: "dot" },
+  { kind: "edge", a: 0.286, b: 1, len: 0.038, cap: "square", dotted: true },
+  { kind: "edge", a: 0.337, b: -1, len: 0.131, cap: "dot", label: "W·0412", ticks: 3 },
+  { kind: "edge", a: 0.401, b: 1, len: 0.071, cap: "dot" },
+  { kind: "edge", a: 0.463, b: -1, len: 0.033, cap: "none", dotted: true, op: 0.6 },
+  { kind: "edge", a: 0.512, b: 1, len: 0.118, cap: "square", label: "0.774", ticks: 4 },
+  { kind: "edge", a: 0.574, b: -1, len: 0.052, cap: "dot" },
+  { kind: "edge", a: 0.628, b: 1, len: 0.087, cap: "dot", dotted: true, op: 0.7 },
+  { kind: "edge", a: 0.671, b: -1, len: 0.044, cap: "dot" },
+
+  // Holding station in the margins. Two long rules, the rest fragments.
+  { kind: "field", a: 0.231, b: 0.206, len: 0.286, angle: 90, ticks: 5, cap: "square" },
+  { kind: "field", a: 0.289, b: 0.585, len: 0.113, angle: 90, dotted: true, op: 0.55 },
+  { kind: "field", a: 0.196, b: 0.702, len: 0.068, angle: 0, cap: "dot", label: "SEG·07" },
+  { kind: "field", a: 0.781, b: 0.163, len: 0.219, angle: 90, ticks: 3, cap: "dot" },
+  { kind: "field", a: 0.826, b: 0.492, len: 0.147, angle: 90, dotted: true, op: 0.5 },
+  { kind: "field", a: 0.697, b: 0.318, len: 0.054, angle: 0, cap: "square" },
+  { kind: "field", a: 0.714, b: 0.771, len: 0.096, angle: 0, cap: "dot", label: "0.914" },
+  // Two diagonals, the only marks off the orthogonals — they stop the field
+  // reading as a pair of rulers.
+  { kind: "field", a: 0.243, b: 0.842, len: 0.079, angle: -34, op: 0.7 },
+  { kind: "field", a: 0.806, b: 0.878, len: 0.061, angle: -146, dotted: true, op: 0.6 },
+  { kind: "field", a: 0.259, b: 0.118, len: 0.042, angle: 26, cap: "dot", op: 0.8 },
+];
+
+/* Deterministic, so the server and the first client render agree. */
 const rand = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 };
 
-interface Node {
-  /** Height fraction of its anchor on the envelope. */
-  y: number;
-  /** -1 left of the axis, +1 right. */
-  side: number;
-  /** How far outside the envelope it sits, as a fraction of that half-width. */
-  out: number;
-  /** Drift phase and rate, so no two nodes breathe together. */
-  phase: number;
-  rate: number;
-  amp: number;
-  /** Seconds between this node's acquisition blips, and where in that cycle it
-   *  starts — staggered so only ever a couple fire at once. */
-  pulsePeriod: number;
-  pulseOffset: number;
-  label: string | null;
-}
-
-const buildNodes = (count: number): Node[] => {
-  const nodes: Node[] = [];
-  // Every third node down one side carries a read-out; more than that and the
-  // overlay starts to read as a caption rather than an instrument.
-  for (let i = 0; i < count; i++) {
-    const s = i / (count - 1);
-    const side = i % 2 === 0 ? 1 : -1;
-    // Spread down the profile with a little scatter, so the chain is irregular
-    // rather than a pair of neat columns.
-    const y = 0.12 + s * 0.56 + (rand(i * 3.1) - 0.5) * 0.035;
-    nodes.push({
-      y,
-      side,
-      out: 1.06 + rand(i * 7.7) * 0.1,
-      phase: rand(i * 1.9) * Math.PI * 2,
-      rate: 0.18 + rand(i * 5.3) * 0.3,
-      amp: 0.05 + rand(i * 11.3) * 0.07,
-      pulsePeriod: 5.5 + rand(i * 13.7) * 9,
-      pulseOffset: rand(i * 17.3),
-      label: null,
-    });
-  }
-  return nodes;
-};
-
 export interface ScanOverlayProps {
-  /** Line and node colour. */
+  /** Line, marker and label colour. */
   color?: string;
-  /** Colour of the active node and the sweep. */
+  /** Colour of an acquisition blip and of the mark nearest the cursor. */
   accentColor?: string;
   /** Master opacity. */
   opacity?: number;
-  /** How many anchor nodes ring the object. */
-  nodeCount?: number;
-  /** Show the coordinate read-outs. */
+  /** Show the numeric read-outs. */
   labels?: boolean;
   style?: CSSProperties;
 }
@@ -121,7 +137,6 @@ export default function ScanOverlay({
   color = "#C8CEDE",
   accentColor = "#8FB4FF",
   opacity = 0.62,
-  nodeCount = 22,
   labels = true,
   style,
 }: ScanOverlayProps) {
@@ -137,9 +152,6 @@ export default function ScanOverlay({
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    const nodes = buildNodes(nodeCount);
-    const labelled = nodes.map((_, i) => i % 4 === 1).map((v, i) => v && i < nodeCount - 2);
-
     const NS = "http://www.w3.org/2000/svg";
     const make = <K extends keyof SVGElementTagNameMap>(
       tag: K,
@@ -150,98 +162,68 @@ export default function ScanOverlay({
       return el;
     };
 
-    /* Draw order matters: outline under chords under nodes under type, so the
-       labels are never crossed by a line. */
-    const chain = make("path", { fill: "none", stroke: color, "stroke-width": 1, opacity: 0.55 });
-    const chords = make("path", {
-      fill: "none",
-      stroke: color,
-      "stroke-width": 1,
-      opacity: 0.3,
-    });
-    const brackets = make("path", {
-      fill: "none",
-      stroke: color,
-      "stroke-width": 1.25,
-      opacity: 0.5,
-    });
-    const ticks = make("path", { fill: "none", stroke: color, "stroke-width": 1, opacity: 0.3 });
-    const sweep = make("line", { stroke: accentColor, "stroke-width": 1, opacity: 0 });
-    svg.append(chords, chain, brackets, ticks, sweep);
-
-    const dots = nodes.map(() =>
-      make("circle", { r: 1.6, fill: "none", stroke: color, "stroke-width": 1, opacity: 0.75 }),
+    /* One path per mark, carrying its segment and its ticks together. Batching
+       every segment into two shared paths is cheaper, but then a mark cannot
+       fade on its own — and the whole point is that they come and go
+       independently. Twenty paths is a handful of attribute writes a frame. */
+    const segs = MARKS.map((m) =>
+      make("path", {
+        fill: "none",
+        stroke: color,
+        "stroke-width": 1,
+        opacity: 0,
+        ...(m.dotted ? { "stroke-dasharray": "1.5 4" } : {}),
+      }),
     );
-    dots.forEach((d) => svg.appendChild(d));
+    segs.forEach((p) => svg.appendChild(p));
 
-    /* Acquisition blips: a ring that expands off a node and fades, as if that
-       point had just been re-measured. One element per node, idle at zero
-       opacity most of the time. */
-    const rings = nodes.map(() =>
-      make("circle", { r: 2, fill: "none", stroke: accentColor, "stroke-width": 1, opacity: 0 }),
+    // Caps and labels stay individual: each needs its own position and each
+    // blips on its own schedule.
+    const caps = MARKS.map((m) =>
+      m.cap === "square"
+        ? make("rect", { width: 3.4, height: 3.4, fill: "none", stroke: color, "stroke-width": 1, opacity: 0.8 })
+        : m.cap === "dot"
+          ? make("circle", { r: 1.5, fill: color, opacity: 0.8 })
+          : null,
     );
-    rings.forEach((r) => svg.appendChild(r));
+    caps.forEach((c) => c && svg.appendChild(c));
 
-    // Only the node nearest the cursor gets the focus square, so the overlay
-    // has one point of attention rather than lighting up everywhere.
-    const focus = make("rect", {
-      width: 11,
-      height: 11,
-      fill: "none",
-      stroke: accentColor,
-      "stroke-width": 1,
-      opacity: 0,
-    });
-    svg.appendChild(focus);
+    const blips = MARKS.map((m) =>
+      m.cap && m.cap !== "none"
+        ? make("circle", { r: 2, fill: "none", stroke: accentColor, "stroke-width": 1, opacity: 0 })
+        : null,
+    );
+    blips.forEach((b) => b && svg.appendChild(b));
 
-    const tag = make("text", {
-      fill: color,
-      "font-size": 8,
-      "letter-spacing": 1.4,
-      opacity: 0.55,
-      "font-family": "'JetBrains Mono', ui-monospace, monospace",
-    });
-    const conf = make("text", {
-      fill: accentColor,
-      "font-size": 8,
-      "letter-spacing": 1.4,
-      opacity: 0.7,
-      "font-family": "'JetBrains Mono', ui-monospace, monospace",
-    });
-    svg.append(tag, conf);
-
-    const texts = nodes.map((_, i) => {
-      if (!labels || !labelled[i]) return null;
-      const t = make("text", {
-        fill: color,
-        "font-size": 7.5,
-        "letter-spacing": 1.1,
-        opacity: 0.42,
-        "font-family": "'JetBrains Mono', ui-monospace, monospace",
-      });
-      svg.appendChild(t);
-      return t;
-    });
+    const texts = MARKS.map((m) =>
+      m.label && labels
+        ? make("text", {
+            fill: color,
+            "font-size": 7.5,
+            "letter-spacing": 1.2,
+            opacity: 0.4,
+            "font-family": "'JetBrains Mono', ui-monospace, monospace",
+          })
+        : null,
+    );
+    texts.forEach((t) => t && svg.appendChild(t));
 
     let w = 1;
     let h = 1;
     /* The scene fits by height on a wide viewport and by width on a narrow one.
        Below that crossover the sculpture shrinks, and an envelope measured in
-       height units alone would leave the overlay hanging off both edges. The
-       ratio is the scene's own: its width constraint binds below aspect 0.679. */
+       height units alone would leave the edge marks hanging in space. */
     let fit = 1;
     let showLabels = true;
+    let showField = true;
     const ro = new ResizeObserver(() => {
       const r = host.getBoundingClientRect();
       w = Math.max(1, r.width);
       h = Math.max(1, r.height);
       fit = Math.min(1, w / h / 0.679);
-      // Snap to the new layout rather than easing across a resize — and this is
-      // also what stops the first frames, measured at 1x1 before this fires,
-      // from seeding every node at the origin and crawling outward.
-      seeded = false;
-      // Labels need room outboard of the geometry; on a phone there is none.
-      showLabels = labels && w >= 560;
+      showLabels = labels && w >= 620;
+      // The margin bands the field marks live in do not exist on a phone.
+      showField = w >= 760;
       svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
     });
     ro.observe(host);
@@ -256,44 +238,27 @@ export default function ScanOverlay({
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerleave", onLeave, { passive: true });
 
-    /* Ring order is fixed at build, not re-sorted per frame. Sorting live
-       means two nodes that drift past each other swap places in the chain, and
-       the polygon snaps to a new topology mid-motion. Fixing it is what lets
-       the nodes move — and be shoved around by the cursor — while the structure
-       they form stays the same. */
-    const ringOrder = (() => {
-      const right: number[] = [];
-      const left: number[] = [];
-      for (let i = 0; i < nodes.length; i++) (nodes[i].side > 0 ? right : left).push(i);
-      right.sort((a, b) => nodes[a].y - nodes[b].y);
-      left.sort((a, b) => nodes[b].y - nodes[a].y);
-      return { ring: right.concat(left), right, left };
-    })();
-    const { ring, right, left } = ringOrder;
-
-    // Rendered positions, eased toward the targets below so cursor reactions
-    // arrive and release smoothly instead of snapping.
-    const px = new Float64Array(nodes.length);
-    const py = new Float64Array(nodes.length);
+    // Rendered start points, eased toward their targets so drift and cursor
+    // reactions arrive smoothly.
+    const sx = new Float64Array(MARKS.length);
+    const sy = new Float64Array(MARKS.length);
     let seeded = false;
     let raf = 0;
-    const t0 = performance.now();
-
     let last = performance.now();
+    const t0 = performance.now();
 
     const frame = (now: number) => {
       const t = reduceMotion ? 4 : (now - t0) / 1000;
       const dt = Math.min((now - last) / 1000, 0.1);
       last = now;
 
-      // Nothing is positionable until the host has been measured.
       if (w <= 2 || h <= 2) {
         raf = requestAnimationFrame(frame);
         return;
       }
 
-      // Fade with scroll: the sculpture is on a fixed canvas, so the overlay
-      // has to let go of it deliberately rather than scrolling away.
+      // The sculpture is on a fixed canvas, so the overlay has to let go of it
+      // deliberately rather than scrolling away with the section.
       const fade = Math.max(0, Math.min(1, 1 - window.scrollY / (h * 0.55)));
       svg.style.opacity = String(fade * opacity);
       if (fade <= 0.001) {
@@ -302,197 +267,180 @@ export default function ScanOverlay({
       }
 
       const cx = w / 2;
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
+      const unit = Math.min(w, h);
+      // The whole rig leans a few pixels with the cursor the way the sculpture
+      // parallaxes, so the marks read as sitting in the scene with it.
+      const leanX = mouse.has ? ((mouse.x - cx) / w) * 7 : 0;
+      const leanY = mouse.has ? ((mouse.y - h * 0.45) / h) * 4 : 0;
 
-      /* The whole rig leans with the cursor by a few pixels, the same way the
-         sculpture parallaxes, so the geometry reads as attached to the object
-         rather than painted on the glass in front of it. */
-      const leanX = mouse.has ? ((mouse.x - cx) / w) * 9 : 0;
-      const leanY = mouse.has ? ((mouse.y - h * 0.45) / h) * 5 : 0;
+      for (let i = 0; i < MARKS.length; i++) {
+        const m = MARKS[i];
+        const hidden = m.kind === "field" && !showField;
 
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        // Two frequencies on the outward normal: one alone reads as a metronome.
+        // Slow drift, two frequencies — one alone reads as a metronome.
+        const ph = rand(i * 3.7) * Math.PI * 2;
+        const rate = 0.13 + rand(i * 5.9) * 0.17;
         const drift =
-          Math.sin(t * n.rate + n.phase) * n.amp +
-          Math.sin(t * n.rate * 2.3 + n.phase * 0.6) * n.amp * 0.35;
-        const hw = envelope(n.y) * (n.out + drift);
-        const yf = n.y + Math.sin(t * n.rate * 0.7 + n.phase * 1.7) * 0.006;
-        // Shrink about the sculpture's centre, not the top of the viewport.
-        let tx = cx + n.side * hw * h * fit + leanX;
-        let ty = (0.4 + (yf - 0.4) * fit) * h + leanY;
+          (Math.sin(t * rate + ph) + Math.sin(t * rate * 2.1 + ph * 0.7) * 0.4) * unit * 0.006;
 
-        /* Cursor nudge. Nodes give ground as it approaches and drift back when
-           it leaves; the ring holds its shape because the topology is fixed, so
-           this deforms the polygon rather than tearing it. */
-        if (mouse.has) {
-          const dx = tx - mouse.x;
-          const dy = ty - mouse.y;
-          const r2 = dx * dx + dy * dy;
-          const infl = Math.exp(-r2 / (130 * 130));
-          if (infl > 0.004) {
+        let x0: number;
+        let y0: number;
+        let dirX: number;
+        let dirY: number;
+
+        if (m.kind === "edge") {
+          // Starts just off the silhouette and reaches outward, horizontally.
+          y0 = (0.4 + (m.a - 0.4) * fit) * h + leanY;
+          x0 = cx + m.b * (envelope(m.a) * h * fit + unit * 0.022) + leanX + m.b * drift;
+          dirX = m.b;
+          dirY = 0;
+        } else {
+          x0 = m.a * w + leanX + drift;
+          y0 = m.b * h + leanY;
+          const rad = ((m.angle ?? 0) * Math.PI) / 180;
+          dirX = Math.cos(rad);
+          dirY = Math.sin(rad);
+        }
+
+        /* Cursor nudge: marks give a little ground as it approaches and settle
+           back as it leaves. They shift bodily — a straight line stays straight. */
+        let heat = 0;
+        if (mouse.has && !hidden) {
+          const ddx = x0 - mouse.x;
+          const ddy = y0 - mouse.y;
+          const r2 = ddx * ddx + ddy * ddy;
+          heat = Math.exp(-r2 / (140 * 140));
+          if (heat > 0.004) {
             const r = Math.sqrt(r2) || 1;
-            tx += (dx / r) * infl * 22;
-            ty += (dy / r) * infl * 22;
+            x0 += (ddx / r) * heat * 14;
+            y0 += (ddy / r) * heat * 14;
           }
         }
 
         if (!seeded) {
-          px[i] = tx;
-          py[i] = ty;
+          sx[i] = x0;
+          sy[i] = y0;
         } else {
           const k = 1 - Math.exp(-dt * 7);
-          px[i] += (tx - px[i]) * k;
-          py[i] += (ty - py[i]) * k;
-        }
-        if (px[i] < minX) minX = px[i];
-        if (px[i] > maxX) maxX = px[i];
-        if (py[i] < minY) minY = py[i];
-        if (py[i] > maxY) maxY = py[i];
-      }
-      seeded = true;
-
-      let d = "";
-      for (let k = 0; k < ring.length; k++) {
-        const i = ring[k];
-        d += `${k === 0 ? "M" : "L"}${px[i].toFixed(1)} ${py[i].toFixed(1)}`;
-      }
-      chain.setAttribute("d", d + "Z");
-
-      /* Callipers: a span across the object at a few heights, capped with end
-         ticks. A measurement, not a chord — long diagonals across the middle
-         read as scribble and fight the sculpture. */
-      let cd = "";
-      const spans = Math.min(right.length, left.length);
-      for (let k = 1; k < spans; k += 3) {
-        const a = right[k];
-        const b = left[left.length - 1 - k];
-        if (a === undefined || b === undefined) continue;
-        const my = (py[a] + py[b]) / 2;
-        cd += `M${px[b].toFixed(1)} ${my.toFixed(1)}L${px[a].toFixed(1)} ${my.toFixed(1)}`;
-        cd += `M${px[b].toFixed(1)} ${(my - 3).toFixed(1)}L${px[b].toFixed(1)} ${(my + 3).toFixed(1)}`;
-        cd += `M${px[a].toFixed(1)} ${(my - 3).toFixed(1)}L${px[a].toFixed(1)} ${(my + 3).toFixed(1)}`;
-      }
-      chords.setAttribute("d", cd);
-
-      // Corner brackets on the bounding box, drawn as four L marks.
-      const pad = 14;
-      const bx0 = minX - pad;
-      const bx1 = maxX + pad;
-      const by0 = minY - pad;
-      const by1 = maxY + pad;
-      const arm = Math.min(26, (bx1 - bx0) * 0.09);
-      brackets.setAttribute(
-        "d",
-        `M${bx0} ${by0 + arm}L${bx0} ${by0}L${bx0 + arm} ${by0}` +
-          `M${bx1 - arm} ${by0}L${bx1} ${by0}L${bx1} ${by0 + arm}` +
-          `M${bx1} ${by1 - arm}L${bx1} ${by1}L${bx1 - arm} ${by1}` +
-          `M${bx0 + arm} ${by1}L${bx0} ${by1}L${bx0} ${by1 - arm}`,
-      );
-
-      // Scale ticks down both edges of the box.
-      let td = "";
-      for (let k = 1; k < 8; k++) {
-        const ty = by0 + ((by1 - by0) * k) / 8;
-        const len = k % 2 === 0 ? 7 : 4;
-        td += `M${bx0} ${ty.toFixed(1)}L${bx0 + len} ${ty.toFixed(1)}`;
-        td += `M${bx1 - len} ${ty.toFixed(1)}L${bx1} ${ty.toFixed(1)}`;
-      }
-      ticks.setAttribute("d", td);
-
-      // Sweep: one slow pass down the box, brightening the nodes it crosses.
-      const sy = by0 + ((t * 0.11) % 1) * (by1 - by0);
-      sweep.setAttribute("x1", String(bx0 + 6));
-      sweep.setAttribute("x2", String(bx1 - 6));
-      sweep.setAttribute("y1", sy.toFixed(1));
-      sweep.setAttribute("y2", sy.toFixed(1));
-      sweep.setAttribute("opacity", "0.16");
-
-      // Nearest node to the cursor takes the focus mark.
-      let near = -1;
-      let nearD = 120 * 120;
-      if (mouse.has) {
-        for (let i = 0; i < nodes.length; i++) {
-          const dx = px[i] - mouse.x;
-          const dy = py[i] - mouse.y;
-          const dd = dx * dx + dy * dy;
-          if (dd < nearD) { nearD = dd; near = i; }
-        }
-      }
-
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        const dot = dots[i];
-        dot.setAttribute("cx", px[i].toFixed(1));
-        dot.setAttribute("cy", py[i].toFixed(1));
-        const lit = Math.exp(-Math.pow((py[i] - sy) / 26, 2));
-        const isNear = i === near;
-
-        // Blip: a short window at the head of each node's own cycle.
-        const cyc = ((t / n.pulsePeriod) % 1 + n.pulseOffset) % 1;
-        const WIN = 0.12;
-        const prog = cyc < WIN ? cyc / WIN : -1;
-        const blip = prog >= 0 ? Math.sin(prog * Math.PI) : 0;
-
-        const ringEl = rings[i];
-        if (prog >= 0) {
-          ringEl.setAttribute("cx", px[i].toFixed(1));
-          ringEl.setAttribute("cy", py[i].toFixed(1));
-          ringEl.setAttribute("r", (2.5 + prog * 9).toFixed(1));
-          ringEl.setAttribute("opacity", ((1 - prog) * 0.5).toFixed(2));
-        } else {
-          ringEl.setAttribute("opacity", "0");
+          sx[i] += (x0 - sx[i]) * k;
+          sy[i] += (y0 - sy[i]) * k;
         }
 
-        dot.setAttribute(
-          "r",
-          isNear ? "3.2" : (1.6 + lit * 1.1 + blip * 1.5).toFixed(2),
-        );
-        dot.setAttribute(
-          "opacity",
-          isNear ? "1" : Math.min(1, 0.5 + lit * 0.45 + blip * 0.5).toFixed(2),
-        );
-        dot.setAttribute("stroke", isNear || blip > 0.35 ? accentColor : color);
+        /* Each mark runs its own long cycle: draw on, hold, fade out, repeat.
+           Offsets are scattered so only two or three are ever in transition —
+           the field should feel like it is being re-read, not like it is
+           blinking. */
+        const period = 11 + rand(i * 7.3) * 9;
+        const cyc = ((t / period) % 1 + rand(i * 23.1)) % 1;
+        const DRAW = 0.1;
+        const FADE = 0.86;
+        let grow = 1;
+        let alpha = 1;
+        if (cyc < DRAW) {
+          // easeOutCubic: the line arrives quickly and settles, which reads as
+          // an instrument acquiring rather than an element animating in.
+          const f = cyc / DRAW;
+          grow = 1 - Math.pow(1 - f, 3);
+          alpha = grow;
+        } else if (cyc > FADE) {
+          alpha = 1 - (cyc - FADE) / (1 - FADE);
+        }
+        // A slow breath across the held span, so nothing sits perfectly static.
+        alpha *= 0.82 + 0.18 * Math.sin(t * (0.5 + rand(i * 31.7) * 0.4) + rand(i * 3.3) * 6.28);
+
+        const len = m.len * unit * grow;
+        const ex = sx[i] + dirX * len;
+        const ey = sy[i] + dirY * len;
+
+        if (hidden) {
+          segs[i].setAttribute("opacity", "0");
+          const cap = caps[i];
+          if (cap) cap.setAttribute("opacity", "0");
+          const bl = blips[i];
+          if (bl) bl.setAttribute("opacity", "0");
+          const tx = texts[i];
+          if (tx) tx.style.display = "none";
+          continue;
+        }
+
+        let d = `M${sx[i].toFixed(1)} ${sy[i].toFixed(1)}L${ex.toFixed(1)} ${ey.toFixed(1)}`;
+
+        // Measurement ticks, only along the length drawn so far.
+        if (m.ticks) {
+          const nx = -dirY;
+          const ny = dirX;
+          const full = m.len * unit;
+          for (let k = 1; k <= m.ticks; k++) {
+            const f = k / (m.ticks + 1);
+            if (f * full > len) break;
+            const tpx = sx[i] + dirX * full * f;
+            const tpy = sy[i] + dirY * full * f;
+            const tl = k % 2 === 0 ? 4.5 : 2.5;
+            d += `M${tpx.toFixed(1)} ${tpy.toFixed(1)}L${(tpx + nx * tl).toFixed(1)} ${(tpy + ny * tl).toFixed(1)}`;
+          }
+        }
+
+        const base = (m.op ?? 1) * (m.dotted ? 0.4 : 0.58);
+        segs[i].setAttribute("d", d);
+        segs[i].setAttribute("opacity", Math.max(0, base * alpha + heat * 0.28).toFixed(3));
+        segs[i].setAttribute("stroke", heat > 0.35 ? accentColor : color);
+
+        /* Acquisition blip on the cap: a ring that expands and fades, as if
+           that point had just been re-read. Staggered so only ever one or two
+           of them fire at a time. */
+        const blipPeriod = 6 + rand(i * 11.3) * 9;
+        const blipCyc = ((t / blipPeriod) % 1 + rand(i * 17.9)) % 1;
+        const WIN = 0.11;
+        const prog = blipCyc < WIN ? blipCyc / WIN : -1;
+        const blipAmt = prog >= 0 ? Math.sin(prog * Math.PI) : 0;
+        const hot = heat > 0.35 || blipAmt > 0.4;
+
+        const cap = caps[i];
+        if (cap) {
+          if (m.cap === "square") {
+            cap.setAttribute("x", (sx[i] - 1.7).toFixed(1));
+            cap.setAttribute("y", (sy[i] - 1.7).toFixed(1));
+          } else {
+            cap.setAttribute("cx", sx[i].toFixed(1));
+            cap.setAttribute("cy", sy[i].toFixed(1));
+            cap.setAttribute("r", (1.5 + blipAmt * 0.9).toFixed(2));
+          }
+          cap.setAttribute(
+            "opacity",
+            Math.max(0, Math.min(1, (0.62 + blipAmt * 0.38 + heat * 0.3) * alpha)).toFixed(2),
+          );
+          cap.setAttribute(m.cap === "square" ? "stroke" : "fill", hot ? accentColor : color);
+        }
+
+        const bl = blips[i];
+        if (bl) {
+          if (prog >= 0) {
+            bl.setAttribute("cx", sx[i].toFixed(1));
+            bl.setAttribute("cy", sy[i].toFixed(1));
+            bl.setAttribute("r", (2.5 + prog * 8).toFixed(1));
+            bl.setAttribute("opacity", ((1 - prog) * 0.45 * alpha).toFixed(2));
+          } else {
+            bl.setAttribute("opacity", "0");
+          }
+        }
 
         const tx = texts[i];
         if (tx) {
           tx.style.display = showLabels ? "" : "none";
-          const rightSide = nodes[i].side > 0;
-          tx.setAttribute("x", (px[i] + (rightSide ? 9 : -9)).toFixed(1));
-          tx.setAttribute("y", (py[i] + 3).toFixed(1));
-          tx.setAttribute("text-anchor", rightSide ? "start" : "end");
+          // Labels sit past the far end of their mark, reading outward.
+          const outward = m.kind === "edge" ? m.b > 0 : dirX >= 0;
+          tx.setAttribute("x", (ex + (outward ? 6 : -6)).toFixed(1));
+          tx.setAttribute("y", (ey + 2.8).toFixed(1));
+          tx.setAttribute("text-anchor", outward ? "start" : "end");
           tx.setAttribute(
             "opacity",
-            isNear ? "0.9" : Math.min(0.95, 0.28 + lit * 0.3 + blip * 0.5).toFixed(2),
+            Math.max(0, Math.min(0.95, (0.34 + blipAmt * 0.45 + heat * 0.4) * alpha)).toFixed(2),
           );
-          tx.setAttribute("fill", isNear || blip > 0.35 ? accentColor : color);
-          tx.textContent = `${(px[i] / w).toFixed(3)}·${(py[i] / h).toFixed(3)}`;
+          tx.setAttribute("fill", hot ? accentColor : color);
+          tx.textContent = m.label ?? "";
         }
       }
-
-      /* Confidence drifts slowly and never settles, which is what makes it
-         read as a live estimate rather than a printed caption. */
-      tag.style.display = showLabels ? "" : "none";
-      conf.style.display = showLabels ? "" : "none";
-      tag.setAttribute("x", (bx0 + 1).toFixed(1));
-      tag.setAttribute("y", (by0 - 9).toFixed(1));
-      tag.textContent = "OBJ·01 / PARTICLE FIELD";
-      conf.setAttribute("x", (bx1 - 1).toFixed(1));
-      conf.setAttribute("y", (by0 - 9).toFixed(1));
-      conf.setAttribute("text-anchor", "end");
-      conf.textContent = `CONF ${(0.93 + Math.sin(t * 0.31) * 0.035).toFixed(3)}`;
-
-      if (near >= 0) {
-        focus.setAttribute("x", (px[near] - 5.5).toFixed(1));
-        focus.setAttribute("y", (py[near] - 5.5).toFixed(1));
-        focus.setAttribute("opacity", "0.85");
-      } else {
-        focus.setAttribute("opacity", "0");
-      }
-
+      seeded = true;
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
@@ -504,19 +452,13 @@ export default function ScanOverlay({
       window.removeEventListener("pointerleave", onLeave);
       while (svg.firstChild) svg.removeChild(svg.firstChild);
     };
-  }, [color, accentColor, opacity, nodeCount, labels]);
+  }, [color, accentColor, opacity, labels]);
 
   return (
     <div
       ref={hostRef}
       aria-hidden
-      style={{
-        position: "fixed",
-        inset: 0,
-        pointerEvents: "none",
-        zIndex: 2,
-        ...style,
-      }}
+      style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 2, ...style }}
     >
       <svg ref={svgRef} width="100%" height="100%" style={{ display: "block", overflow: "visible" }} />
     </div>
