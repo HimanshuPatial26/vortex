@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { height: 100%; }
+body { margin: 0; background: #06070C; }
+
+/* ── HeroVortex HUD ── */
+/* Narrow viewports drop the side HUD blocks: at phone width the micro-type
+   collides with the sculpture and the hero copy. */
+@media (max-width: 720px) {
+  .hv-hud-tl p,
+  .hv-hud-tl > div:nth-of-type(2) { display: none; }
+  .hv-hud-tr > div:nth-of-type(2) { display: none; }
+}
+@media (max-width: 460px) {
+  .hv-hud { display: none; }
+}
+/* The footer captions wrap into each other on a phone, and the pointer hint
+   they carry does not apply to touch anyway. */
+@media (max-width: 620px) {
+  .hv-foot > span:last-child { display: none; }
+}
