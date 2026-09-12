@@ -71,6 +71,10 @@ interface Node {
   phase: number;
   rate: number;
   amp: number;
+  /** Seconds between this node's acquisition blips, and where in that cycle it
+   *  starts — staggered so only ever a couple fire at once. */
+  pulsePeriod: number;
+  pulseOffset: number;
   label: string | null;
 }
 
@@ -90,7 +94,9 @@ const buildNodes = (count: number): Node[] => {
       out: 1.06 + rand(i * 7.7) * 0.1,
       phase: rand(i * 1.9) * Math.PI * 2,
       rate: 0.18 + rand(i * 5.3) * 0.3,
-      amp: 0.03 + rand(i * 11.3) * 0.05,
+      amp: 0.05 + rand(i * 11.3) * 0.07,
+      pulsePeriod: 5.5 + rand(i * 13.7) * 9,
+      pulseOffset: rand(i * 17.3),
       label: null,
     });
   }
@@ -168,6 +174,14 @@ export default function ScanOverlay({
     );
     dots.forEach((d) => svg.appendChild(d));
 
+    /* Acquisition blips: a ring that expands off a node and fades, as if that
+       point had just been re-measured. One element per node, idle at zero
+       opacity most of the time. */
+    const rings = nodes.map(() =>
+      make("circle", { r: 2, fill: "none", stroke: accentColor, "stroke-width": 1, opacity: 0 }),
+    );
+    rings.forEach((r) => svg.appendChild(r));
+
     // Only the node nearest the cursor gets the focus square, so the overlay
     // has one point of attention rather than lighting up everywhere.
     const focus = make("rect", {
@@ -222,6 +236,10 @@ export default function ScanOverlay({
       w = Math.max(1, r.width);
       h = Math.max(1, r.height);
       fit = Math.min(1, w / h / 0.679);
+      // Snap to the new layout rather than easing across a resize — and this is
+      // also what stops the first frames, measured at 1x1 before this fires,
+      // from seeding every node at the origin and crawling outward.
+      seeded = false;
       // Labels need room outboard of the geometry; on a phone there is none.
       showLabels = labels && w >= 560;
       svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
@@ -238,13 +256,41 @@ export default function ScanOverlay({
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerleave", onLeave, { passive: true });
 
+    /* Ring order is fixed at build, not re-sorted per frame. Sorting live
+       means two nodes that drift past each other swap places in the chain, and
+       the polygon snaps to a new topology mid-motion. Fixing it is what lets
+       the nodes move — and be shoved around by the cursor — while the structure
+       they form stays the same. */
+    const ringOrder = (() => {
+      const right: number[] = [];
+      const left: number[] = [];
+      for (let i = 0; i < nodes.length; i++) (nodes[i].side > 0 ? right : left).push(i);
+      right.sort((a, b) => nodes[a].y - nodes[b].y);
+      left.sort((a, b) => nodes[b].y - nodes[a].y);
+      return { ring: right.concat(left), right, left };
+    })();
+    const { ring, right, left } = ringOrder;
+
+    // Rendered positions, eased toward the targets below so cursor reactions
+    // arrive and release smoothly instead of snapping.
     const px = new Float64Array(nodes.length);
     const py = new Float64Array(nodes.length);
+    let seeded = false;
     let raf = 0;
     const t0 = performance.now();
 
+    let last = performance.now();
+
     const frame = (now: number) => {
       const t = reduceMotion ? 4 : (now - t0) / 1000;
+      const dt = Math.min((now - last) / 1000, 0.1);
+      last = now;
+
+      // Nothing is positionable until the host has been measured.
+      if (w <= 2 || h <= 2) {
+        raf = requestAnimationFrame(frame);
+        return;
+      }
 
       // Fade with scroll: the sculpture is on a fixed canvas, so the overlay
       // has to let go of it deliberately rather than scrolling away.
@@ -261,32 +307,54 @@ export default function ScanOverlay({
       let minY = Infinity;
       let maxY = -Infinity;
 
+      /* The whole rig leans with the cursor by a few pixels, the same way the
+         sculpture parallaxes, so the geometry reads as attached to the object
+         rather than painted on the glass in front of it. */
+      const leanX = mouse.has ? ((mouse.x - cx) / w) * 9 : 0;
+      const leanY = mouse.has ? ((mouse.y - h * 0.45) / h) * 5 : 0;
+
       for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i];
-        // Breathe along the outward normal, which keeps every node on its own
-        // radius from the axis instead of wandering across the object.
-        const drift = Math.sin(t * n.rate + n.phase) * n.amp;
+        // Two frequencies on the outward normal: one alone reads as a metronome.
+        const drift =
+          Math.sin(t * n.rate + n.phase) * n.amp +
+          Math.sin(t * n.rate * 2.3 + n.phase * 0.6) * n.amp * 0.35;
         const hw = envelope(n.y) * (n.out + drift);
-        const yf = n.y + Math.sin(t * n.rate * 0.7 + n.phase * 1.7) * 0.004;
+        const yf = n.y + Math.sin(t * n.rate * 0.7 + n.phase * 1.7) * 0.006;
         // Shrink about the sculpture's centre, not the top of the viewport.
-        const y = (0.4 + (yf - 0.4) * fit) * h;
-        const x = cx + n.side * hw * h * fit;
-        px[i] = x;
-        py[i] = y;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
+        let tx = cx + n.side * hw * h * fit + leanX;
+        let ty = (0.4 + (yf - 0.4) * fit) * h + leanY;
 
-      /* The chain walks down one side and back up the other, so it closes into
-         a single irregular polygon around the object rather than two arcs. */
-      const right: number[] = [];
-      const left: number[] = [];
-      for (let i = 0; i < nodes.length; i++) (nodes[i].side > 0 ? right : left).push(i);
-      right.sort((a, b) => py[a] - py[b]);
-      left.sort((a, b) => py[b] - py[a]);
-      const ring = right.concat(left);
+        /* Cursor nudge. Nodes give ground as it approaches and drift back when
+           it leaves; the ring holds its shape because the topology is fixed, so
+           this deforms the polygon rather than tearing it. */
+        if (mouse.has) {
+          const dx = tx - mouse.x;
+          const dy = ty - mouse.y;
+          const r2 = dx * dx + dy * dy;
+          const infl = Math.exp(-r2 / (130 * 130));
+          if (infl > 0.004) {
+            const r = Math.sqrt(r2) || 1;
+            tx += (dx / r) * infl * 22;
+            ty += (dy / r) * infl * 22;
+          }
+        }
+
+        if (!seeded) {
+          px[i] = tx;
+          py[i] = ty;
+        } else {
+          const k = 1 - Math.exp(-dt * 7);
+          px[i] += (tx - px[i]) * k;
+          py[i] += (ty - py[i]) * k;
+        }
+        if (px[i] < minX) minX = px[i];
+        if (px[i] > maxX) maxX = px[i];
+        if (py[i] < minY) minY = py[i];
+        if (py[i] > maxY) maxY = py[i];
+      }
+      seeded = true;
+
       let d = "";
       for (let k = 0; k < ring.length; k++) {
         const i = ring[k];
@@ -356,14 +424,38 @@ export default function ScanOverlay({
       }
 
       for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
         const dot = dots[i];
         dot.setAttribute("cx", px[i].toFixed(1));
         dot.setAttribute("cy", py[i].toFixed(1));
         const lit = Math.exp(-Math.pow((py[i] - sy) / 26, 2));
         const isNear = i === near;
-        dot.setAttribute("r", isNear ? "3.2" : (1.6 + lit * 1.1).toFixed(2));
-        dot.setAttribute("opacity", isNear ? "1" : (0.5 + lit * 0.45).toFixed(2));
-        dot.setAttribute("stroke", isNear ? accentColor : color);
+
+        // Blip: a short window at the head of each node's own cycle.
+        const cyc = ((t / n.pulsePeriod) % 1 + n.pulseOffset) % 1;
+        const WIN = 0.12;
+        const prog = cyc < WIN ? cyc / WIN : -1;
+        const blip = prog >= 0 ? Math.sin(prog * Math.PI) : 0;
+
+        const ringEl = rings[i];
+        if (prog >= 0) {
+          ringEl.setAttribute("cx", px[i].toFixed(1));
+          ringEl.setAttribute("cy", py[i].toFixed(1));
+          ringEl.setAttribute("r", (2.5 + prog * 9).toFixed(1));
+          ringEl.setAttribute("opacity", ((1 - prog) * 0.5).toFixed(2));
+        } else {
+          ringEl.setAttribute("opacity", "0");
+        }
+
+        dot.setAttribute(
+          "r",
+          isNear ? "3.2" : (1.6 + lit * 1.1 + blip * 1.5).toFixed(2),
+        );
+        dot.setAttribute(
+          "opacity",
+          isNear ? "1" : Math.min(1, 0.5 + lit * 0.45 + blip * 0.5).toFixed(2),
+        );
+        dot.setAttribute("stroke", isNear || blip > 0.35 ? accentColor : color);
 
         const tx = texts[i];
         if (tx) {
@@ -372,8 +464,11 @@ export default function ScanOverlay({
           tx.setAttribute("x", (px[i] + (rightSide ? 9 : -9)).toFixed(1));
           tx.setAttribute("y", (py[i] + 3).toFixed(1));
           tx.setAttribute("text-anchor", rightSide ? "start" : "end");
-          tx.setAttribute("opacity", isNear ? "0.9" : (0.28 + lit * 0.3).toFixed(2));
-          tx.setAttribute("fill", isNear ? accentColor : color);
+          tx.setAttribute(
+            "opacity",
+            isNear ? "0.9" : Math.min(0.95, 0.28 + lit * 0.3 + blip * 0.5).toFixed(2),
+          );
+          tx.setAttribute("fill", isNear || blip > 0.35 ? accentColor : color);
           tx.textContent = `${(px[i] / w).toFixed(3)}·${(py[i] / h).toFixed(3)}`;
         }
       }

@@ -106,14 +106,22 @@ sum straight back to grey. And the sweep is clamped rather than wrapped with
 just outside its silhouette, chained into an irregular polygon, callipers
 spanning it at a few heights, corner brackets on the bounding box, scale ticks
 down both edges, and coordinate labels on a handful of nodes. A slow sweep
-passes down the box and brightens the nodes it crosses; the node nearest the
-cursor takes a focus mark and its read-out goes accent-coloured.
+passes down the box and brightens the nodes it crosses; nodes fire acquisition
+blips on their own staggered cycles, a couple lit at any moment; and the node
+nearest the cursor takes a focus mark while nodes around it give ground and
+drift back as it leaves.
 
 SVG, not WebGL. The lines have to stay hairline-crisp at any DPR and the labels
 are real text — both of which the DOM does for free and a shader turns into a
 project. It costs about thirty nodes' worth of attribute writes per frame.
 
-Two things it has to get right:
+The ring's topology is fixed at build, not re-sorted per frame. Sorting live
+means two nodes that drift past each other swap places in the chain and the
+polygon snaps to a new shape mid-motion. Fixing it is what lets the nodes move,
+and be shoved around by the cursor, while the structure they form stays the
+same.
+
+Two more things it has to get right:
 
 **It is fixed to the viewport, not flowed with the hero.** The sculpture is
 drawn on a fixed canvas, so an overlay anchored in the document would slide off
