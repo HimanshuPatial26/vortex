@@ -186,6 +186,8 @@ out float vAlpha;
 out float vHeat;
 out float vDepth;
 out float vSeed;
+out float vPrism;
+out float vHue;
 
 ${NOISE}
 ${POINTER}
@@ -333,6 +335,21 @@ void main() {
   vHeat = heat;
   vDepth = clamp(dist / 18.0, 0.0, 1.0);
   vSeed = aRand.z;
+
+  /* Prismatic dispersion. Placed in screen space against the light rather than
+     on the geometry, so it always sits on the flank the light leaves through
+     however the column is turned. Suppressed as the field becomes terrain —
+     that form reads monochrome. */
+  vec2 sp = clip.xy / clip.w;
+  // The dense lower body, weighted toward the flank the light leaves through.
+  float lowerBody = 1.0 - smoothstep(0.38, 0.86, v);
+  float litSide = smoothstep(-0.45, 0.4, sp.x);
+  vPrism = lowerBody * mix(0.3, 1.0, litSide) * (1.0 - uMorph);
+  /* Spatially coherent, or additive blending averages the region back to grey.
+     Clamped rather than wrapped: fract puts a hard seam where pale meets blue,
+     and the span below walks the whole ramp across the flank anyway — blue at
+     the inner edge through violet and rose to gold at the rim. */
+  vHue = clamp(sp.x * 1.15 + sp.y * 0.4 + 0.52, 0.0, 1.0);
 }
 `;
 
@@ -343,12 +360,31 @@ in float vAlpha;
 in float vHeat;
 in float vDepth;
 in float vSeed;
+in float vPrism;
+in float vHue;
 
 uniform vec3 uColor;
 uniform vec3 uAccent;
 uniform float uOpacity;
+uniform float uSpectrum;
 
 out vec4 fragColor;
+
+/* The dispersion ramp: deep blue through violet and rose into gold, closing on
+   a pale wash. Hand-placed stops rather than a hue rotation — an even sweep
+   through HSV puts far too much green in the middle. */
+vec3 spectrum(float t) {
+  const vec3 c0 = vec3(0.10, 0.28, 1.00);
+  const vec3 c1 = vec3(0.45, 0.25, 1.00);
+  const vec3 c2 = vec3(0.95, 0.40, 0.70);
+  const vec3 c3 = vec3(1.00, 0.72, 0.25);
+  const vec3 c4 = vec3(0.70, 0.88, 1.00);
+  float x = clamp(t, 0.0, 1.0) * 4.0;
+  if (x < 1.0) return mix(c0, c1, x);
+  if (x < 2.0) return mix(c1, c2, x - 1.0);
+  if (x < 3.0) return mix(c2, c3, x - 2.0);
+  return mix(c3, c4, x - 3.0);
+}
 
 void main() {
   // Soft round sprite with a hot core — dense regions stack into the bright
@@ -359,9 +395,15 @@ void main() {
   float mask = smoothstep(0.5, 0.06, r);
   mask *= mask;
 
-  // Faint prismatic bloom on the deep particles, matching the blue/gold
-  // fringing that creeps into the lower half of the reference.
-  vec3 tint = mix(uColor, uAccent, smoothstep(0.45, 1.0, vDepth) * 0.55 * vSeed);
+  float prism = clamp(vPrism * uSpectrum * mix(0.25, 1.0, vSeed), 0.0, 1.0);
+
+  // Faint cool fringe on the deep particles — but it is itself a blue tint, so
+  // it stands down wherever the dispersion proper is doing the colouring.
+  vec3 tint = mix(uColor, uAccent, smoothstep(0.45, 1.0, vDepth) * 0.35 * vSeed * (1.0 - prism));
+
+  // Dispersion across the lit flank.
+  tint = mix(tint, spectrum(vHue), prism);
+
   vec3 col = mix(tint, vec3(1.0), clamp(vHeat, 0.0, 1.0) * 0.8);
 
   float a = mask * vAlpha * uOpacity * (1.0 + vHeat * 1.4);
@@ -559,6 +601,9 @@ export interface ParticleVortexProps {
   morphSource?: () => number;
   /** Draw the eclipse ring at the centre of the terrain. */
   showRing?: boolean;
+  /** Strength of the prismatic dispersion across the lit flank of the cloud.
+   *  0 leaves the field monochrome. */
+  spectrumStrength?: number;
   /** Where pointer events are listened for. "container" is right when the
    *  canvas is the top layer. Use "window" when content sits above the canvas
    *  and would otherwise swallow every click before it arrives. */
@@ -588,6 +633,7 @@ export default function ParticleVortex({
   morph = 0,
   morphSource,
   showRing = true,
+  spectrumStrength = 1,
   pointerScope = "container",
   style,
   className,
@@ -599,13 +645,13 @@ export default function ParticleVortex({
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
-    morph, morphSource, showRing,
+    morph, morphSource, showRing, spectrumStrength,
   });
   propsRef.current = {
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
-    morph, morphSource, showRing,
+    morph, morphSource, showRing, spectrumStrength,
   };
 
   const applyProps = () => {
@@ -620,6 +666,7 @@ export default function ParticleVortex({
     u.uOpacity.value = p.opacity;
     u.uRepel.value = p.repelStrength;
     u.uSplashStrength.value = p.splashStrength;
+    u.uSpectrum.value = p.spectrumStrength;
     const set = (arr: Float32Array, hex: string) => {
       const v = hexToRgb(hex);
       arr[0] = v[0]; arr[1] = v[1]; arr[2] = v[2];
@@ -714,6 +761,7 @@ export default function ParticleVortex({
         uOpacity: { value: opacity },
         uColor: { value: new Float32Array([1, 1, 1]) },
         uAccent: { value: new Float32Array([1, 1, 1]) },
+        uSpectrum: { value: 1.0 },
         uMouse: { value: new Float32Array([0, 0]) },
         uAspect: { value: 1 },
         uRepel: { value: repelStrength },

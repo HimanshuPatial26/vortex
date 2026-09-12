@@ -77,6 +77,29 @@ Three layers, all driven from the same pointer state so they stay in register:
 that still answers the pointer, and drops to the `low` particle count. Clicking
 still advances the page, but it jumps rather than bursting and gliding.
 
+## Light and dispersion
+
+The hero is lit from one corner rather than by a key light behind the
+sculpture. `LightRays` is a fan of beams pinned at that corner by
+`transform-origin`, masked to an ellipse over the sculpture so they read as
+landing on it instead of washing the section. `focus` moves and resizes that
+ellipse; `intensity` scales the fan; `from` mirrors it to the other corner.
+
+CSS rather than a shader pass, deliberately: the particle canvas is shared
+across every section, so anything drawn into it would follow the page down.
+These live inside the hero's element and are clipped by its overflow, which is
+what keeps the effect to that one section.
+
+The light's counterpart in the field is `spectrumStrength` — a dispersion ramp
+(blue through violet and rose to gold) swept across the flank the light leaves
+through, over the dense lower body, and faded out entirely as the field becomes
+terrain.
+
+Two things matter if you retune it. The hue must vary *spatially*, not per
+particle: under additive blending, neighbouring points carrying different hues
+sum straight back to grey. And the sweep is clamped rather than wrapped with
+`fract`, which would put a hard seam where pale meets blue.
+
 ## Carrying the field between sections
 
 `VortexScene` puts one canvas, fixed to the viewport, behind every section it
@@ -134,6 +157,7 @@ Plus `density`, `color`, `accentColor` and `lineColor`, passed through.
 | `morph` | `0` | Static blend: `0` vortex, `1` terrain. |
 | `morphSource` | — | Read once per frame instead, for scroll-driven blends. |
 | `showRing` | `true` | Draw the eclipse ring at the centre of the terrain. |
+| `spectrumStrength` | `1` | Prismatic dispersion across the lit flank. `0` leaves the field monochrome. |
 | `splashOnClick` | `false` | Burst the whole field across the screen on press. |
 | `splashStrength` | `1.15` | How far the burst throws particles, in NDC units. |
 | `splashDuration` | `1.15` | Seconds for the burst to travel out and settle. |
