@@ -62,12 +62,17 @@ Three layers, all driven from the same pointer state so they stay in register:
   particles pushing harder, so the void it carves has depth.
 - **Pulse** — pressing fires an expanding ring that displaces and brightens
   particles as it sweeps through them.
+- **Splash + advance** — the same press bursts the entire field across the
+  screen and scrolls to the next section at the same time. The burst propagates
+  outward from the click, so particles nearest your cursor leave first, then
+  reconverges as the page settles.
 - **Parallax** — the scene takes a slow yaw and pitch from the pointer. The
   vitrine flexes at a third of the particle response, so the cage reads as
   rigid rather than billowing with the cloud.
 
 `prefers-reduced-motion: reduce` renders a composed still — no drift, no flow —
-that still answers the pointer, and drops to the `low` particle count.
+that still answers the pointer, and drops to the `low` particle count. Clicking
+still advances the page, but it jumps rather than bursting and gliding.
 
 ## Props
 
@@ -88,6 +93,10 @@ that still answers the pointer, and drops to the `low` particle count.
 | `repelStrength` | `0.09` | How far the cursor pushes particles aside. |
 | `showVitrine` | `true` | Draw the nested wireframe prisms. |
 | `clickPulse` | `true` | Emit a pulse ring on press. |
+| `splashOnClick` | `false` | Burst the whole field across the screen on press. |
+| `splashStrength` | `1.15` | How far the burst throws particles, in NDC units. |
+| `splashDuration` | `1.15` | Seconds for the burst to travel out and settle. |
+| `onSplash` | — | Fires the moment a burst starts. `HeroVortex` uses it to scroll. |
 
 ### `HeroVortex`
 
@@ -95,6 +104,30 @@ All copy is prop-driven: `eyebrow`, `headline`, `subline`, `actions`, `note`,
 `specs`, `channels`, `footerLeft`, `footerRight`. `headline` and `actions` take
 nodes, the rest take strings. Plus `density` (passed through), `height`
 (default `100svh`) and `style`.
+
+### Click to advance
+
+Give `HeroVortex` the id of the section below it and clicking the field bursts
+the particles and scrolls there in one gesture:
+
+```tsx
+<HeroVortex advanceToId="next" />
+...
+<section id="next">…</section>
+```
+
+| Prop | Default | What it does |
+| --- | --- | --- |
+| `advanceToId` | — | id of the element to scroll to. Omit and the click still splashes, it just does not move the page. |
+| `advanceDuration` | `1100` | Milliseconds the scroll takes. |
+| `onAdvance` | — | Runs alongside the scroll, for anything else the click should trigger. |
+
+The scroll is a hand-written `requestAnimationFrame` tween rather than
+`scrollIntoView({ behavior: "smooth" })`, which lands in roughly 200ms — the
+page would arrive well before the particles had finished leaving. The tween uses
+`easeInOutCubic`, so its velocity peaks at the midpoint, which is exactly where
+the burst reaches full extension. It cancels itself the moment the visitor
+scrolls, touches or presses a key, so it never fights them for control.
 
 ## Performance
 

@@ -8,6 +8,7 @@
    All copy is prop-driven so the same composition can front any page. */
 
 import dynamic from "next/dynamic";
+import { useCallback, useEffect, useRef } from "react";
 import { color, font } from "../theme";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -53,6 +54,14 @@ export interface HeroVortexProps {
   density?: "low" | "medium" | "high";
   /** Section height. Defaults to a full viewport. */
   height?: string;
+  /** id of the element to scroll to when the field is clicked. Omit and the
+   *  click still splashes, it just does not advance the page. */
+  advanceToId?: string;
+  /** Runs alongside the scroll on click, for anything else the click triggers. */
+  onAdvance?: () => void;
+  /** Milliseconds the advance scroll takes. Matched to the splash by default so
+   *  the page travels with the particles instead of arriving ahead of them. */
+  advanceDuration?: number;
   style?: CSSProperties;
 }
 
@@ -116,7 +125,7 @@ export default function HeroVortex({
       <em style={{ fontStyle: "italic", color: color.textDim }}>one draw call.</em>
     </>
   ),
-  subline = "A GPU-resident lattice streamed through a noise volume. Move the cursor to part it; press to send a pulse through it.",
+  subline = "A GPU-resident lattice streamed through a noise volume. Move the cursor to part it; click anywhere to burst it and read on.",
   actions,
   note = "A live particle field: a cylindrical lattice streamed through a noise volume, flared at the mouth and dispersed at the base. Rendered on the GPU in a single draw call.",
   specs = [
@@ -127,11 +136,82 @@ export default function HeroVortex({
   ],
   channels = ["SIGNAL / STABLE", "DRIFT / CONTINUOUS", "RESPONSE / REALTIME"],
   footerLeft = "HERO SYSTEM — PARTICLE VORTEX",
-  footerRight = "MOVE THE CURSOR · PRESS TO PULSE",
+  footerRight = "CLICK THE FIELD TO CONTINUE ↓",
   density = "medium",
   height = "100svh",
+  advanceToId,
+  onAdvance,
+  advanceDuration = 1100,
   style,
 }: HeroVortexProps) {
+  const scrollRaf = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (scrollRaf.current !== null) cancelAnimationFrame(scrollRaf.current);
+    },
+    [],
+  );
+
+  /* Fires the instant the burst starts. The scroll is tweened by hand rather
+     than handed to scrollIntoView({ behavior: "smooth" }) because that lands in
+     a couple of hundred milliseconds — the page would arrive before the
+     particles had finished leaving. */
+  const handleSplash = useCallback(() => {
+    onAdvance?.();
+    if (!advanceToId) return;
+    const el = document.getElementById(advanceToId);
+    if (!el) return;
+
+    const startY = window.scrollY;
+    const targetY = Math.round(startY + el.getBoundingClientRect().top);
+    const delta = targetY - startY;
+    if (delta === 0) return;
+
+    const reduce =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || advanceDuration <= 0) {
+      window.scrollTo(window.scrollX, targetY);
+      return;
+    }
+
+    if (scrollRaf.current !== null) cancelAnimationFrame(scrollRaf.current);
+
+    // Hand the scroll straight back if the visitor takes over mid-flight.
+    const detach = () => {
+      window.removeEventListener("wheel", cancel);
+      window.removeEventListener("touchstart", cancel);
+      window.removeEventListener("keydown", cancel);
+    };
+    function cancel() {
+      if (scrollRaf.current !== null) {
+        cancelAnimationFrame(scrollRaf.current);
+        scrollRaf.current = null;
+      }
+      detach();
+    }
+    window.addEventListener("wheel", cancel, { passive: true });
+    window.addEventListener("touchstart", cancel, { passive: true });
+    window.addEventListener("keydown", cancel);
+
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = Math.min((now - t0) / advanceDuration, 1);
+      // easeInOutCubic — velocity peaks at the midpoint, which is exactly where
+      // the splash is at full extension.
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      window.scrollTo(window.scrollX, startY + delta * e);
+      if (t < 1) {
+        scrollRaf.current = requestAnimationFrame(step);
+      } else {
+        scrollRaf.current = null;
+        detach();
+      }
+    };
+    scrollRaf.current = requestAnimationFrame(step);
+  }, [advanceToId, onAdvance, advanceDuration]);
+
   return (
     <section
       style={{
@@ -172,6 +252,8 @@ export default function HeroVortex({
           opacity={0.95}
           parallaxStrength={0.5}
           repelStrength={0.09}
+          splashOnClick
+          onSplash={handleSplash}
         />
       </div>
 

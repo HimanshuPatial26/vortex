@@ -109,6 +109,36 @@ vec2 pointerOffset(vec2 ndc, float depthScale, out float heat) {
   }
   return off;
 }
+
+/* Splash — the whole field bursts outward from the click and reconverges,
+   covering the screen while the page scrolls to the next section. Kept
+   separate from pointerOffset because it needs per-particle scatter, which
+   the vitrine (a fixed cage) must not have. */
+vec2 splashOffset(vec2 ndc, vec3 seed, float depthScale, out float heat) {
+  heat = 0.0;
+  if (uSplash <= 0.001) return vec2(0.0);
+
+  float p = 1.0 - uSplash;              // 0 at impact, 1 when settled
+  vec2 d = ndc - uSplashOrigin;
+  d.x *= uAspect;
+  float r = length(d);
+
+  // Radially outward, jittered per particle so the burst scatters like spray
+  // instead of expanding as one clean disc.
+  vec2 n = r > 1e-4 ? d / r : vec2(cos(seed.x * 6.2832), sin(seed.x * 6.2832));
+  float ang = (seed.y - 0.5) * 1.2;
+  n = vec2(n.x * cos(ang) - n.y * sin(ang), n.x * sin(ang) + n.y * cos(ang));
+
+  // The front travels outward from the impact, so near particles leave first
+  // and the far edge of the screen answers a beat later.
+  float lead = smoothstep(0.0, 0.42, p - r * 0.2);
+  // Out and back: sin peaks mid-flight and returns the field to rest at p = 1.
+  float wave = sin(clamp(lead, 0.0, 1.0) * 3.14159);
+  float speed = mix(0.75, 2.6, seed.z);
+
+  heat = wave * 2.0;
+  return n * wave * speed * uSplashStrength * depthScale;
+}
 `;
 
 /* ── Particle sculpture ──────────────────────────────────────────────────── */
@@ -143,6 +173,9 @@ uniform float uRepel;
 uniform float uRepelRadius;
 uniform float uPointerIn;
 uniform float uPulse;
+uniform float uSplash;
+uniform vec2 uSplashOrigin;
+uniform float uSplashStrength;
 
 out float vAlpha;
 out float vHeat;
@@ -225,6 +258,11 @@ void main() {
   // Nearer particles answer the cursor harder, so the field gains depth.
   float depthScale = clamp(6.0 / max(-mv.z, 0.5), 0.35, 1.6);
   ndc += pointerOffset(ndc, depthScale, heat);
+
+  float splashHeat;
+  ndc += splashOffset(ndc, aRand, depthScale, splashHeat);
+  heat += splashHeat;
+
   clip.xy = ndc * clip.w;
   gl_Position = clip;
 
@@ -242,6 +280,9 @@ void main() {
   float facing = mix(0.3, 1.0, smoothstep(uCamDist + 2.6, uCamDist - 3.0, dist));
   float veil = mix(1.0, 1.65, smoothstep(uWaist, 0.95, v));
   vAlpha = fog * facing * uBrightness * veil * (0.55 + aRand.y * 0.6) * (1.0 - dust * 0.3);
+  // Mid-splash the field is spread across the whole screen, far from where the
+  // fog was calibrated, so lift it back toward full brightness as it flies.
+  vAlpha = mix(vAlpha, max(vAlpha, uBrightness * 0.75), clamp(splashHeat * 0.5, 0.0, 1.0));
   vHeat = heat;
   vDepth = clamp(dist / 18.0, 0.0, 1.0);
   vSeed = aRand.z;
@@ -297,6 +338,9 @@ uniform float uRepel;
 uniform float uRepelRadius;
 uniform float uPointerIn;
 uniform float uPulse;
+uniform float uSplash;
+uniform vec2 uSplashOrigin;
+uniform float uSplashStrength;
 
 out float vFade;
 out float vHeat;
@@ -413,6 +457,14 @@ export interface ParticleVortexProps {
   showVitrine?: boolean;
   /** Emit an expanding pulse ring on pointer/press. */
   clickPulse?: boolean;
+  /** Burst the whole field across the screen on press, then reconverge. */
+  splashOnClick?: boolean;
+  /** How far the splash throws particles, in NDC units. */
+  splashStrength?: number;
+  /** Seconds the splash takes to travel out and settle back. */
+  splashDuration?: number;
+  /** Fired the moment a splash starts — use it to advance the page. */
+  onSplash?: () => void;
   style?: React.CSSProperties;
   className?: string;
 }
@@ -431,6 +483,10 @@ export default function ParticleVortex({
   repelStrength = 0.09,
   showVitrine = true,
   clickPulse = true,
+  splashOnClick = false,
+  splashStrength = 1.15,
+  splashDuration = 1.15,
+  onSplash,
   style,
   className,
 }: ParticleVortexProps) {
@@ -440,10 +496,12 @@ export default function ParticleVortex({
   const propsRef = useRef({
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
+    splashOnClick, splashStrength, splashDuration, onSplash,
   });
   propsRef.current = {
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
+    splashOnClick, splashStrength, splashDuration, onSplash,
   };
 
   const applyProps = () => {
@@ -457,6 +515,7 @@ export default function ParticleVortex({
     u.uBrightness.value = p.brightness;
     u.uOpacity.value = p.opacity;
     u.uRepel.value = p.repelStrength;
+    u.uSplashStrength.value = p.splashStrength;
     const set = (arr: Float32Array, hex: string) => {
       const v = hexToRgb(hex);
       arr[0] = v[0]; arr[1] = v[1]; arr[2] = v[2];
@@ -556,6 +615,9 @@ export default function ParticleVortex({
         uRepelRadius: { value: 0.34 },
         uPointerIn: { value: 0 },
         uPulse: { value: 0 },
+        uSplash: { value: 0 },
+        uSplashOrigin: { value: new Float32Array([0, 0]) },
+        uSplashStrength: { value: 1.15 },
       },
     });
     const points = new Mesh(gl, { geometry: pointGeometry, program: pointProgram, mode: gl.POINTS });
@@ -622,6 +684,7 @@ export default function ParticleVortex({
     let pointerIn = 0;
     let pointerInTarget = 0;
     let pulse = 0;
+    let splash = 0;
 
     const host = (container.parentElement || container) as HTMLElement;
 
@@ -633,11 +696,24 @@ export default function ParticleVortex({
     };
     const onLeave = () => { pointerInTarget = 0; };
     const onDown = (e: PointerEvent) => {
-      if (!propsRef.current.clickPulse) return;
+      const p = propsRef.current;
+      if (!p.clickPulse && !p.splashOnClick) return;
       onMove(e);
+      // Snap the smoothed cursor to the press so the burst starts exactly
+      // under the finger rather than wherever the easing had got to.
       mouse[0] = mouseTarget[0];
       mouse[1] = mouseTarget[1];
-      pulse = 1;
+      if (p.clickPulse) pulse = 1;
+      if (p.splashOnClick) {
+        // Ignore presses during a splash: re-triggering mid-flight snaps the
+        // field and would fire the parent's scroll a second time.
+        if (splash > 0.001) return;
+        if (!reduceMotion) splash = 1;
+        const origin = pointProgram.uniforms.uSplashOrigin.value as Float32Array;
+        origin[0] = mouseTarget[0];
+        origin[1] = mouseTarget[1];
+        p.onSplash?.();
+      }
     };
 
     host.addEventListener("pointermove", onMove, { passive: true });
@@ -665,6 +741,7 @@ export default function ParticleVortex({
       mouse[1] += (mouseTarget[1] - mouse[1]) * 0.07;
       pointerIn += (pointerInTarget - pointerIn) * 0.06;
       pulse = Math.max(0, pulse - dt * 0.85);
+      splash = Math.max(0, splash - dt / Math.max(p.splashDuration, 0.05));
 
       const parallax = reduceMotion ? 0 : p.parallaxStrength;
       scene.rotation.y = mouse[0] * parallax * 0.32;
@@ -674,6 +751,7 @@ export default function ParticleVortex({
       pu.uTime.value = clock;
       pu.uPointerIn.value = pointerIn;
       pu.uPulse.value = pulse;
+      pu.uSplash.value = splash;
       (pu.uMouse.value as Float32Array).set(mouse);
 
       const lu = lineProgram.uniforms as any;
