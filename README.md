@@ -109,18 +109,39 @@ throughout, the points that scatter out of the hero are literally the points
 that reassemble below — not a second field that resembles the first.
 
 ```tsx
-<VortexScene onSplash={advance}>
+<VortexScene sections={["next", "third"]}>
   <HeroVortex renderCanvas={false} />
   <section id="next">…</section>
+  <section id="third">…</section>
 </VortexScene>
 ```
+
+Each id in `sections` is a stop on the morph axis — `0` the hero's vortex, `1`
+the terrain, `2` the dunes — and the scene advances to whichever comes next when
+the field is clicked. Crossing a boundary scatters the field whether you click
+or simply scroll; a click's own splash suppresses the one its scroll would
+otherwise fire, so they never double up.
 
 `renderCanvas={false}` tells `HeroVortex` to draw only its chrome — key light,
 grain, HUD, copy — and leave the sculpture to the scene. Sections inside a
 `VortexScene` must be transparent, or they paint over the field behind them;
 the scene owns the page background.
 
-The two forms share a lattice but read its axes differently. In the vortex,
+### The third form
+
+The dunes drop the camera onto the field itself: a wide plane read from just
+above its own surface, rolling under two travelling octaves of noise. Three
+details carry it.
+
+Points are **jittered inside their own lattice cells**, turning the regular grid
+into a stratified random scatter — a visible grid is the one thing this form
+cannot have. Brightness comes off the **surface slope**, not its height: the
+bright filament in the reference is the crest catching the light, which means
+sampling neighbouring heights for a normal. And a **faked circle of confusion**
+swells and dims whatever falls outside the focal band, which is what gives the
+near field its soft dark mass.
+
+The two earlier forms share a lattice but read its axes differently. In the vortex,
 strand index is the angle and samples run along each strand. In the terrain,
 samples wrap the circle — so every ring is drawn by hundreds of points and
 bands into a contour line — while strand index steps outward as concentric
@@ -129,7 +150,9 @@ noise rather than banding.
 
 | `VortexScene` prop | Default | What it does |
 | --- | --- | --- |
-| `morphSpan` | `1` | Viewports of scrolling the morph takes. `1` completes it as the second section fills the screen. |
+| `sections` | `[]` | ids after the hero, in order. Each is a stop on the morph axis. |
+| `morphSpan` | `1` | Viewports of scrolling per morph stage. |
+| `advanceDuration` | `1100` | Milliseconds a click-advance scroll takes. |
 | `background` | `#06070C` | The ground the field is drawn against. |
 | `onSplash` | — | Fires on click; wire it to `useAdvanceScroll`. |
 
@@ -157,6 +180,7 @@ Plus `density`, `color`, `accentColor` and `lineColor`, passed through.
 | `morph` | `0` | Static blend: `0` vortex, `1` terrain. |
 | `morphSource` | — | Read once per frame instead, for scroll-driven blends. |
 | `showRing` | `true` | Draw the eclipse ring at the centre of the terrain. |
+| `splashAt` | — | Morph values that splash when the scroll crosses them going down. |
 | `spectrumStrength` | `1` | Prismatic dispersion across the lit flank. `0` leaves the field monochrome. |
 | `splashOnClick` | `false` | Burst the whole field across the screen on press. |
 | `splashStrength` | `1.15` | How far the burst throws particles, in NDC units. |

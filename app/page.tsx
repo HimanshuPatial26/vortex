@@ -10,8 +10,7 @@
 
 import VortexScene from "./components/VortexScene";
 import HeroVortex from "./components/HeroVortex";
-import { useAdvanceScroll } from "./components/useAdvanceScroll";
-import { color, font, radius } from "./theme";
+import { color, font } from "./theme";
 
 const mono = {
   fontFamily: font.mono,
@@ -26,12 +25,16 @@ const READOUT = [
   { key: "SOURCE", value: "CARRIED FROM 01" },
 ];
 
-export default function Page() {
-  // The scene owns the click, so the tween lives here and is handed down.
-  const advance = useAdvanceScroll("next", 1100);
+const DUNE_READOUT = [
+  { key: "FORM", value: "TRAVELLING SWELL" },
+  { key: "SHADING", value: "SLOPE / CREST" },
+  { key: "LENS", value: "SHALLOW FOCUS" },
+];
 
+export default function Page() {
   return (
-    <VortexScene onSplash={advance}>
+    // The scene owns the morph axis and the advance: each id is a stop on it.
+    <VortexScene sections={["next", "third"]}>
       <HeroVortex renderCanvas={false} />
 
       {/* Where the hero's click lands, and where the scattered particles
@@ -102,6 +105,80 @@ export default function Page() {
 
           <div style={{ display: "grid", gap: 4 }}>
             {READOUT.map((r) => (
+              <div key={r.key} style={{ ...mono, display: "flex", gap: 10 }}>
+                <span style={{ color: color.textMono2, minWidth: 58 }}>{r.key}</span>
+                <span style={{ color: color.textFaint }}>{r.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Third stop. Scrolling past the boundary scatters the field again and
+          it settles into the dune plane. */}
+      <section
+        id="third"
+        style={{
+          position: "relative",
+          minHeight: "100svh",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          padding: "clamp(40px, 7vh, 76px) clamp(20px, 5vw, 48px)",
+        }}
+      >
+        <div style={{ maxWidth: 520 }}>
+          <div style={{ ...mono, color: color.textFaint, marginBottom: 16 }}>
+            03 / DOWN ON THE SURFACE
+          </div>
+          <h2
+            style={{
+              fontFamily: font.display,
+              fontWeight: 300,
+              fontSize: "clamp(26px, 4vw, 40px)",
+              lineHeight: 1.14,
+              letterSpacing: "-0.02em",
+              margin: 0,
+              textShadow: "0 2px 40px rgba(0,0,0,0.9)",
+            }}
+          >
+            Close enough
+            <br />
+            <em style={{ fontStyle: "italic", color: color.textDim }}>
+              to lose the horizon.
+            </em>
+          </h2>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            gap: 32,
+            flexWrap: "wrap",
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              maxWidth: 380,
+              fontFamily: font.body,
+              fontSize: 13.5,
+              lineHeight: 1.7,
+              color: color.textMuted,
+              textShadow: "0 2px 30px rgba(0,0,0,0.95)",
+            }}
+          >
+            The third stop drops the camera onto the field itself. Points are
+            jittered inside their own lattice cells, so nothing reads as a grid;
+            brightness comes off the surface slope rather than its height, which
+            is what draws the light along the crests; and a faked circle of
+            confusion swells whatever falls outside the focal band.
+          </p>
+
+          <div style={{ display: "grid", gap: 4 }}>
+            {DUNE_READOUT.map((r) => (
               <div key={r.key} style={{ ...mono, display: "flex", gap: 10 }}>
                 <span style={{ color: color.textMono2, minWidth: 58 }}>{r.key}</span>
                 <span style={{ color: color.textFaint }}>{r.value}</span>

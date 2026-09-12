@@ -26,6 +26,9 @@ const hexToRgb = (hex: string): [number, number, number] => {
   return [parseInt(r[1], 16) / 255, parseInt(r[2], 16) / 255, parseInt(r[3], 16) / 255];
 };
 
+/** How long the click pulse ring takes to travel out and fade, in ms. */
+const PULSE_MS = 1176;
+
 const densityToCount = (d: "low" | "medium" | "high") =>
   d === "low" ? 48000 : d === "high" ? 180000 : 110000;
 
@@ -181,6 +184,13 @@ uniform float uTerrainRadius;
 uniform float uTerrainAmp;
 uniform float uTerrainScale;
 uniform float uTerrainDrop;
+uniform float uDuneWidth;
+uniform float uDuneDepth;
+uniform float uDuneNear;
+uniform float uDuneAmp;
+uniform float uDuneDrop;
+uniform float uDuneFlow;
+uniform float uDuneFocus;
 
 out float vAlpha;
 out float vHeat;
@@ -188,13 +198,28 @@ out float vDepth;
 out float vSeed;
 out float vPrism;
 out float vHue;
+out float vLit;
 
 ${NOISE}
 ${POINTER}
 
 const float TAU = 6.28318530718;
 
+/* Dune height field. Two travelling octaves; the coarse one carries the rolling
+   swell, the fine one the ripple on its flanks. Sampled more than once per
+   vertex — the crest highlight needs the surface slope, which means
+   neighbouring heights. */
+float duneHeight(vec2 p, float time) {
+  float h = snoise(vec3(p * 0.16, time * 0.22));
+  h += snoise(vec3(p * 0.42 + 31.7, time * 0.31)) * 0.38;
+  return h;
+}
+
 void main() {
+  // Morph runs 0 (vortex) -> 1 (terrain) -> 2 (dunes); each stage blends on its
+  // own 0..1 slice so the curves keyed to earlier forms do not extrapolate.
+  float m1 = clamp(uMorph, 0.0, 1.0);
+  float m2 = clamp(uMorph - 1.0, 0.0, 1.0);
   float col = mod(aIndex, uCols);
   float row = floor(aIndex / uCols);
 
@@ -264,7 +289,7 @@ void main() {
      the short axis (strand index) steps outward as concentric rings. Mapping
      it the other way round gives only ~220 points per ring, which scatters
      into noise instead of banding. */
-  if (uMorph > 0.001) {
+  if (m1 > 0.001) {
     float rn = 0.06 + a * 0.94;
     float trad = rn * uTerrainRadius;
     float tth = t * TAU + uTime * uSpin * 0.1;
@@ -292,8 +317,45 @@ void main() {
 
     // Ease the swap so particles accelerate out of the vortex and settle into
     // the landscape rather than sliding between the two at constant speed.
-    float m = uMorph * uMorph * (3.0 - 2.0 * uMorph);
+    float m = m1 * m1 * (3.0 - 2.0 * m1);
     pos = mix(pos, terrain, m);
+  }
+
+  /* ── Dunes, the third form ─────────────────────────────────────────────
+     A wide plane read from just above its own surface. The lattice axes swap
+     again: the long axis runs across the frame, the short one away from the
+     camera, where perspective compresses it back to a dense field. Each point
+     is jittered inside its own cell, which turns the regular lattice into a
+     stratified random scatter — a visible grid is the one thing this form
+     cannot have. */
+  float vCrest = 0.0;
+  if (m2 > 0.001) {
+    vec2 cell = vec2(uDuneWidth / uRows, (uDuneDepth + uDuneNear) / uCols);
+    vec2 dp = vec2(
+      (t - 0.5) * uDuneWidth + (aRand.x - 0.5) * cell.x * 1.6,
+      mix(uDuneNear, -uDuneDepth, a) + (aRand.y - 0.5) * cell.y * 1.6
+    );
+    // The swell travels toward the camera, so the field flows rather than
+    // simply undulating in place.
+    dp.y += uTime * uDuneFlow;
+
+    float h = duneHeight(dp, uTime);
+
+    // Slope from neighbouring samples. The bright line in the reference is the
+    // crest catching the light, so brightness has to come from the surface
+    // normal, not from height.
+    float e = 0.6;
+    float hx = duneHeight(dp + vec2(e, 0.0), uTime);
+    float hz = duneHeight(dp + vec2(0.0, e), uTime);
+    vec3 nrm = normalize(vec3((h - hx) / e, 1.0, (h - hz) / e) * vec3(uDuneAmp, 1.0, uDuneAmp));
+    float lambert = clamp(dot(nrm, normalize(vec3(-0.3, 0.5, 0.81))), 0.0, 1.0);
+    // Tightened hard: a linear falloff gives a broad sheen where the reference
+    // has a filament.
+    vCrest = pow(lambert, 3.2);
+
+    vec3 dune = vec3(dp.x, h * uDuneAmp - uDuneDrop, dp.y);
+    float md = m2 * m2 * (3.0 - 2.0 * m2);
+    pos = mix(pos, dune, md);
   }
 
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
@@ -319,16 +381,38 @@ void main() {
   float sizeCurve = mix(0.95, 1.5, band) * mix(1.0, 0.55, smoothstep(0.5, 1.0, v));
   // The terrain wants an even, finer grid — the vortex's profile weighting
   // would blotch it.
-  sizeCurve = mix(sizeCurve, 0.82, uMorph);
+  sizeCurve = mix(sizeCurve, 0.82, m1);
   gl_PointSize = uSize * uDpr * sizeCurve * (0.62 + aRand.x * 0.8) * (uCamDist * 0.62 / dist);
-  gl_PointSize = clamp(gl_PointSize, 0.6, 14.0);
+  if (m2 > 0.001) gl_PointSize = mix(gl_PointSize, max(gl_PointSize, 1.5 * uDpr), m2);
+
+  /* Depth of field, dunes only. The reference is shot with a shallow lens: a
+     band in focus, everything nearer and further swelling into soft bokeh.
+     Faked the cheap way — a point off the focal plane grows and dims, which is
+     what a circle of confusion does to a point source. */
+  float coc = 0.0;
+  if (m2 > 0.001) {
+    coc = clamp(abs(dist - uDuneFocus) / (uDuneFocus * 1.15), 0.0, 1.0) * m2;
+    gl_PointSize *= 1.0 + coc * coc * 5.5;
+  }
+  gl_PointSize = clamp(gl_PointSize, 0.6, 26.0);
 
   // Depth fog plus a light dimming of the far wall, which keeps the front of
   // the column readable instead of washing into a solid mass.
   float fog = clamp((uCamDist + 6.0 - dist) / 10.0, 0.0, 1.0);
   float facing = mix(0.3, 1.0, smoothstep(uCamDist + 2.6, uCamDist - 3.0, dist));
-  float veil = mix(mix(1.0, 1.65, smoothstep(uWaist, 0.95, v)), 1.15, uMorph);
+  float veil = mix(mix(1.0, 1.65, smoothstep(uWaist, 0.95, v)), 1.15, m1);
   vAlpha = fog * facing * uBrightness * veil * (0.55 + aRand.y * 0.6) * (1.0 - dust * 0.3);
+
+  if (m2 > 0.001) {
+    // Crest lighting takes over from the vortex's depth shading: the form is a
+    // lit surface now, not a cloud, so brightness should follow its slope.
+    float duneAlpha = uBrightness * (0.42 + vCrest * 1.7) * (0.55 + aRand.y * 0.6);
+    // Spreading the same energy over a larger sprite is what keeps defocused
+    // points reading as soft blur rather than bright blobs.
+    duneAlpha *= 1.0 - coc * 0.5;
+    vAlpha = mix(vAlpha, duneAlpha, m2);
+  }
+  vLit = vCrest * m2;
   // Mid-splash the field is spread across the whole screen, far from where the
   // fog was calibrated, so lift it back toward full brightness as it flies.
   vAlpha = mix(vAlpha, max(vAlpha, uBrightness * 0.75), clamp(splashHeat * 0.5, 0.0, 1.0));
@@ -344,7 +428,7 @@ void main() {
   // The dense lower body, weighted toward the flank the light leaves through.
   float lowerBody = 1.0 - smoothstep(0.38, 0.86, v);
   float litSide = smoothstep(-0.45, 0.4, sp.x);
-  vPrism = lowerBody * mix(0.3, 1.0, litSide) * (1.0 - uMorph);
+  vPrism = lowerBody * mix(0.3, 1.0, litSide) * (1.0 - m1);
   /* Spatially coherent, or additive blending averages the region back to grey.
      Clamped rather than wrapped: fract puts a hard seam where pale meets blue,
      and the span below walks the whole ramp across the flank anyway — blue at
@@ -362,6 +446,7 @@ in float vDepth;
 in float vSeed;
 in float vPrism;
 in float vHue;
+in float vLit;
 
 uniform vec3 uColor;
 uniform vec3 uAccent;
@@ -405,6 +490,8 @@ void main() {
   tint = mix(tint, spectrum(vHue), prism);
 
   vec3 col = mix(tint, vec3(1.0), clamp(vHeat, 0.0, 1.0) * 0.8);
+  // The crest line is the brightest thing in the dune reference; let it clip.
+  col = mix(col, vec3(1.0), clamp(vLit, 0.0, 1.0) * 0.85);
 
   float a = mask * vAlpha * uOpacity * (1.0 + vHeat * 1.4);
   fragColor = vec4(col * a, a);
@@ -594,6 +681,10 @@ export interface ParticleVortexProps {
   splashDuration?: number;
   /** Fired the moment a splash starts — use it to advance the page. */
   onSplash?: () => void;
+  /** Morph values that fire a splash when the scroll crosses them going down.
+   *  Lets a plain scroll scatter the field at a section boundary, the same way
+   *  a click does. */
+  splashAt?: number[];
   /** 0 = vortex, 1 = terrain. Static blend between the two forms. */
   morph?: number;
   /** Read once per frame for the morph, for scroll-driven blends. Overrides
@@ -632,6 +723,7 @@ export default function ParticleVortex({
   onSplash,
   morph = 0,
   morphSource,
+  splashAt,
   showRing = true,
   spectrumStrength = 1,
   pointerScope = "container",
@@ -645,13 +737,13 @@ export default function ParticleVortex({
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
-    morph, morphSource, showRing, spectrumStrength,
+    morph, morphSource, showRing, spectrumStrength, splashAt,
   });
   propsRef.current = {
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
-    morph, morphSource, showRing, spectrumStrength,
+    morph, morphSource, showRing, spectrumStrength, splashAt,
   };
 
   const applyProps = () => {
@@ -776,6 +868,13 @@ export default function ParticleVortex({
         uTerrainAmp: { value: 6.4 },
         uTerrainScale: { value: 0.115 },
         uTerrainDrop: { value: 2.2 },
+        uDuneWidth: { value: 30 },
+        uDuneDepth: { value: 40 },
+        uDuneNear: { value: 10 },
+        uDuneAmp: { value: 2.8 },
+        uDuneDrop: { value: 0.8 },
+        uDuneFlow: { value: 0.85 },
+        uDuneFocus: { value: 12 },
       },
     });
     const points = new Mesh(gl, { geometry: pointGeometry, program: pointProgram, mode: gl.POINTS });
@@ -832,6 +931,7 @@ export default function ParticleVortex({
 
     // Declared ahead of setSize, which runs during setup and assigns terrainR.
     let terrainR = 5;
+    let duneScale = 1;
     const camZ = camera.position.z;
     const camY = camera.position.y;
     const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
@@ -857,6 +957,9 @@ export default function ParticleVortex({
       // The terrain camera is placed relative to the fitted disc, so the
       // landscape frames the same way at every viewport.
       terrainR = fit * (pointProgram.uniforms.uTerrainRadius.value as number);
+      // The dune camera sits inside the field, so its station has to be
+      // expressed in the same scaled units the plane is drawn in.
+      duneScale = fit;
 
       (pointProgram.uniforms.uCamDist.value as number) = camera.position.z;
       (pointProgram.uniforms.uAspect.value as number) = aspect;
@@ -874,6 +977,9 @@ export default function ParticleVortex({
     const mouseTarget = new Float32Array([0, 0]);
     let pointerIn = 0;
     let pointerInTarget = 0;
+    // Wall-clock start times, not per-frame decay: see the dt clamp below.
+    let pulseStart = -1;
+    let splashStart = -1;
     let pulse = 0;
     let splash = 0;
 
@@ -901,12 +1007,12 @@ export default function ParticleVortex({
       // under the finger rather than wherever the easing had got to.
       mouse[0] = mouseTarget[0];
       mouse[1] = mouseTarget[1];
-      if (p.clickPulse) pulse = 1;
+      if (p.clickPulse) pulseStart = performance.now();
       if (p.splashOnClick) {
         // Ignore presses during a splash: re-triggering mid-flight snaps the
         // field and would fire the parent's scroll a second time.
         if (splash > 0.001) return;
-        if (!reduceMotion) splash = 1;
+        if (!reduceMotion) splashStart = performance.now();
         const origin = pointProgram.uniforms.uSplashOrigin.value as Float32Array;
         origin[0] = mouseTarget[0];
         origin[1] = mouseTarget[1];
@@ -923,6 +1029,7 @@ export default function ParticleVortex({
     let isPageVisible = !document.hidden;
     let last = performance.now();
     let morphNow = 0;
+    let lastTarget: number | null = null;
     // Reduced motion still gets a still frame plus pointer response, never drift.
     let clock = reduceMotion ? 6 : 0;
 
@@ -946,11 +1053,32 @@ export default function ParticleVortex({
       mouse[0] += (mouseTarget[0] - mouse[0]) * 0.07;
       mouse[1] += (mouseTarget[1] - mouse[1]) * 0.07;
       pointerIn += (pointerInTarget - pointerIn) * 0.06;
-      pulse = Math.max(0, pulse - dt * 0.85);
-      splash = Math.max(0, splash - dt / Math.max(p.splashDuration, 0.05));
+      pulse = pulseStart < 0 ? 0 : Math.max(0, 1 - (t - pulseStart) / PULSE_MS);
+      splash =
+        splashStart < 0
+          ? 0
+          : Math.max(0, 1 - (t - splashStart) / (Math.max(p.splashDuration, 0.05) * 1000));
 
       const target = p.morphSource ? p.morphSource() : p.morph;
-      morphNow += (Math.max(0, Math.min(1, target)) - morphNow) * 0.14;
+
+      /* Fire a splash when the scroll crosses a boundary on the way down, so
+         scrolling scatters the field exactly as clicking does. Guarded on the
+         splash already running, which is what stops a click's own splash from
+         being doubled by the scroll it triggers. */
+      if (p.splashAt && lastTarget !== null && !reduceMotion) {
+        for (const mark of p.splashAt) {
+          if (lastTarget < mark && target >= mark && splash <= 0.001) {
+            splashStart = performance.now();
+            const o = pointProgram.uniforms.uSplashOrigin.value as Float32Array;
+            o[0] = 0;
+            o[1] = 0;
+            break;
+          }
+        }
+      }
+      lastTarget = target;
+
+      morphNow += (target - morphNow) * 0.14;
 
       const parallax = reduceMotion ? 0 : p.parallaxStrength;
       // The terrain is read from much closer to its own surface, so the
@@ -958,12 +1086,20 @@ export default function ParticleVortex({
       scene.rotation.y = mouse[0] * parallax * (0.32 - morphNow * 0.24);
       scene.rotation.x = -mouse[1] * parallax * (0.14 - morphNow * 0.09);
 
-      /* Drop the camera to near ground level and pull it back to the edge of
-         the disc, so the far side of the terrain stacks up the frame as a
-         range instead of being read down into as a bowl. */
-      camera.position.y = lerp(camY, terrainR * 0.13, morphNow);
-      camera.position.z = lerp(camZ, terrainR * 0.78, morphNow);
-      camera.lookAt([0, lerp(0, terrainR * 0.05, morphNow), lerp(0, -terrainR * 0.3, morphNow)]);
+      /* Three camera stations along the morph axis. Terrain drops to near
+         ground level at the rim of the disc, so the far side stacks up the
+         frame as a range instead of being read down into as a bowl. Dunes go
+         lower and closer still — the reference sits almost on the surface,
+         which is what gives it that raking perspective. */
+      const k1 = Math.min(morphNow, 1);
+      const k2 = Math.max(0, Math.min(morphNow - 1, 1));
+      const ty = lerp(camY, terrainR * 0.13, k1);
+      const tz = lerp(camZ, terrainR * 0.78, k1);
+      const tax = lerp(0, terrainR * 0.05, k1);
+      const taz = lerp(0, -terrainR * 0.3, k1);
+      camera.position.y = lerp(ty, duneScale * 3.4, k2);
+      camera.position.z = lerp(tz, duneScale * 8.0, k2);
+      camera.lookAt([0, lerp(tax, -duneScale * 1.6, k2), lerp(taz, -duneScale * 9, k2)]);
 
       const pu = pointProgram.uniforms as any;
       pu.uTime.value = clock;
@@ -976,7 +1112,7 @@ export default function ParticleVortex({
       lu.uPointerIn.value = pointerIn;
       lu.uPulse.value = pulse;
       // The cage belongs to the hero; it has no business around a landscape.
-      lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * (1 - morphNow);
+      lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * Math.max(0, 1 - morphNow);
       (lu.uMouse.value as Float32Array).set(mouse);
 
       pu.uMorph.value = morphNow;
@@ -984,7 +1120,11 @@ export default function ParticleVortex({
       const ru = ringProgram.uniforms as any;
       // Fades in over the back half of the morph, once there is a terrain for
       // it to sit in.
-      ru.uMorph.value = p.showRing ? Math.max(0, (morphNow - 0.45) / 0.55) : 0;
+      // Belongs to the terrain: fades in with it and back out as the dunes
+      // take over.
+      const ringIn = Math.max(0, Math.min(1, (morphNow - 0.45) / 0.55));
+      const ringOut = Math.max(0, Math.min(1, (morphNow - 1.1) / 0.5));
+      ru.uMorph.value = p.showRing ? ringIn * (1 - ringOut) : 0;
       const rc = ru.uCenter.value as Float32Array;
       rc[0] = mouse[0] * parallax * 0.05;
       rc[1] = -0.06 + mouse[1] * parallax * 0.03;

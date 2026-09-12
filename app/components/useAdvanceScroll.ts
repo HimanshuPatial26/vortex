@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-export function useAdvanceScroll(targetId?: string, duration = 1100) {
+export function useAdvanceScroll(defaultTargetId?: string, duration = 1100) {
   const raf = useRef<number | null>(null);
 
   useEffect(
@@ -20,9 +20,12 @@ export function useAdvanceScroll(targetId?: string, duration = 1100) {
     [],
   );
 
-  return useCallback(() => {
-    if (!targetId) return;
-    const el = document.getElementById(targetId);
+  /* The id can be supplied per call, so a caller with several sections can
+     pick the next one at click time instead of binding one up front. */
+  return useCallback((targetId?: string) => {
+    const id = targetId ?? defaultTargetId;
+    if (!id) return;
+    const el = document.getElementById(id);
     if (!el) return;
 
     const startY = window.scrollY;
@@ -70,5 +73,5 @@ export function useAdvanceScroll(targetId?: string, duration = 1100) {
       }
     };
     raf.current = requestAnimationFrame(step);
-  }, [targetId, duration]);
+  }, [defaultTargetId, duration]);
 }

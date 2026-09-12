@@ -12,7 +12,8 @@
    alike. */
 
 import dynamic from "next/dynamic";
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
+import { useAdvanceScroll } from "./useAdvanceScroll";
 import type { CSSProperties, ReactNode } from "react";
 
 const ParticleVortex = dynamic(() => import("./ParticleVortex"), { ssr: false });
@@ -27,10 +28,15 @@ export interface VortexSceneProps {
   accentColor?: string;
   /** Hairline colour of the hero's vitrine. */
   lineColor?: string;
-  /** Fraction of a viewport of scrolling over which the field becomes terrain.
-   *  1 means the morph completes exactly as the second section fills the screen. */
+  /** ids of the sections after the hero, in order. Each one is a stop on the
+   *  morph axis: the field takes its next form as that section fills the
+   *  screen, and a click advances to whichever comes next. */
+  sections?: string[];
+  /** Fraction of a viewport of scrolling per morph stage. */
   morphSpan?: number;
-  /** Fires when the field is clicked, for the page to scroll. */
+  /** Milliseconds a click-advance scroll takes. */
+  advanceDuration?: number;
+  /** Runs alongside the advance when the field is clicked. */
   onSplash?: () => void;
   /** Page ground. The sections above are transparent, so this is what the
    *  field is drawn against. */
@@ -44,20 +50,40 @@ export default function VortexScene({
   color = "#E8EAF2",
   accentColor = "#8FB4FF",
   lineColor = "#C8CEDE",
+  sections = [],
   morphSpan = 1,
+  advanceDuration = 1100,
   onSplash,
   background = "#06070C",
   style,
 }: VortexSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const scrollTo = useAdvanceScroll(undefined, advanceDuration);
 
   /* Read once per frame by the render loop rather than pushed in as a prop from
      a scroll listener — a React render per scroll event would cost far more
      than the field itself. */
   const morphSource = useCallback(() => {
     const span = Math.max(window.innerHeight * morphSpan, 1);
-    return Math.max(0, Math.min(1, window.scrollY / span));
-  }, [morphSpan]);
+    return Math.max(0, Math.min(sections.length, window.scrollY / span));
+  }, [morphSpan, sections.length]);
+
+  /* One just past every boundary, so a plain scroll scatters the field at each
+     handover exactly as a click does. A click's own splash suppresses the one
+     its scroll would otherwise trigger, so they never double up. */
+  const splashAt = useMemo(
+    () => sections.map((_, i) => i + 0.22),
+    [sections],
+  );
+
+  // A click advances to whichever section comes next from where the page is.
+  const handleSplash = useCallback(() => {
+    onSplash?.();
+    if (!sections.length) return;
+    const here = Math.round(window.scrollY / Math.max(window.innerHeight, 1));
+    const id = sections[Math.min(here, sections.length - 1)];
+    if (id) scrollTo(id);
+  }, [onSplash, sections, scrollTo]);
 
   return (
     <div ref={hostRef} style={{ position: "relative", background, ...style }}>
@@ -84,8 +110,9 @@ export default function VortexScene({
             parallaxStrength={0.5}
             repelStrength={0.09}
             splashOnClick
-            onSplash={onSplash}
+            onSplash={handleSplash}
             morphSource={morphSource}
+            splashAt={splashAt}
             pointerScope="window"
           />
         </div>
