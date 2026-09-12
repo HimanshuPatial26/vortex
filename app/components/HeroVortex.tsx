@@ -8,7 +8,8 @@
    All copy is prop-driven so the same composition can front any page. */
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
+import { useAdvanceScroll } from "./useAdvanceScroll";
 import { color, font } from "../theme";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -62,6 +63,9 @@ export interface HeroVortexProps {
   /** Milliseconds the advance scroll takes. Matched to the splash by default so
    *  the page travels with the particles instead of arriving ahead of them. */
   advanceDuration?: number;
+  /** Draw the sculpture inside this section. Set false when the hero sits in a
+   *  VortexScene, which owns one canvas spanning every section. */
+  renderCanvas?: boolean;
   style?: CSSProperties;
 }
 
@@ -142,75 +146,14 @@ export default function HeroVortex({
   advanceToId,
   onAdvance,
   advanceDuration = 1100,
+  renderCanvas = true,
   style,
 }: HeroVortexProps) {
-  const scrollRaf = useRef<number | null>(null);
-
-  useEffect(
-    () => () => {
-      if (scrollRaf.current !== null) cancelAnimationFrame(scrollRaf.current);
-    },
-    [],
-  );
-
-  /* Fires the instant the burst starts. The scroll is tweened by hand rather
-     than handed to scrollIntoView({ behavior: "smooth" }) because that lands in
-     a couple of hundred milliseconds — the page would arrive before the
-     particles had finished leaving. */
+  const advance = useAdvanceScroll(advanceToId, advanceDuration);
   const handleSplash = useCallback(() => {
     onAdvance?.();
-    if (!advanceToId) return;
-    const el = document.getElementById(advanceToId);
-    if (!el) return;
-
-    const startY = window.scrollY;
-    const targetY = Math.round(startY + el.getBoundingClientRect().top);
-    const delta = targetY - startY;
-    if (delta === 0) return;
-
-    const reduce =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce || advanceDuration <= 0) {
-      window.scrollTo(window.scrollX, targetY);
-      return;
-    }
-
-    if (scrollRaf.current !== null) cancelAnimationFrame(scrollRaf.current);
-
-    // Hand the scroll straight back if the visitor takes over mid-flight.
-    const detach = () => {
-      window.removeEventListener("wheel", cancel);
-      window.removeEventListener("touchstart", cancel);
-      window.removeEventListener("keydown", cancel);
-    };
-    function cancel() {
-      if (scrollRaf.current !== null) {
-        cancelAnimationFrame(scrollRaf.current);
-        scrollRaf.current = null;
-      }
-      detach();
-    }
-    window.addEventListener("wheel", cancel, { passive: true });
-    window.addEventListener("touchstart", cancel, { passive: true });
-    window.addEventListener("keydown", cancel);
-
-    const t0 = performance.now();
-    const step = (now: number) => {
-      const t = Math.min((now - t0) / advanceDuration, 1);
-      // easeInOutCubic — velocity peaks at the midpoint, which is exactly where
-      // the splash is at full extension.
-      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      window.scrollTo(window.scrollX, startY + delta * e);
-      if (t < 1) {
-        scrollRaf.current = requestAnimationFrame(step);
-      } else {
-        scrollRaf.current = null;
-        detach();
-      }
-    };
-    scrollRaf.current = requestAnimationFrame(step);
-  }, [advanceToId, onAdvance, advanceDuration]);
+    advance();
+  }, [onAdvance, advance]);
 
   return (
     <section
@@ -218,7 +161,7 @@ export default function HeroVortex({
         position: "relative",
         width: "100%",
         minHeight: height,
-        background: color.ink,
+        background: renderCanvas ? color.ink : "transparent",
         color: color.text,
         overflow: "hidden",
         isolation: "isolate",
@@ -232,16 +175,22 @@ export default function HeroVortex({
         style={{
           position: "absolute",
           inset: 0,
-          background: `
-            radial-gradient(54% 44% at 50% 16%, rgba(214,218,230,0.2), transparent 72%),
-            radial-gradient(86% 66% at 52% 32%, rgba(160,168,188,0.07), transparent 78%),
-            linear-gradient(180deg, #0B0C10 0%, ${color.ink} 48%, #000 100%)
-          `,
+          background: [
+            "radial-gradient(54% 44% at 50% 16%, rgba(214,218,230,0.2), transparent 72%)",
+            "radial-gradient(86% 66% at 52% 32%, rgba(160,168,188,0.07), transparent 78%)",
+            // The ground pass is opaque, so it only belongs here when this
+            // section owns its canvas. In a VortexScene the shared field is
+            // behind the section and this would paint straight over it.
+            renderCanvas
+              ? `linear-gradient(180deg, #0B0C10 0%, ${color.ink} 48%, #000 100%)`
+              : "linear-gradient(180deg, rgba(11,12,16,0.55) 0%, rgba(6,7,12,0.25) 45%, rgba(0,0,0,0.6) 100%)",
+          ].join(","),
         }}
       />
 
       {/* The sculpture. Sized to the section so the vitrine breathes on tall
           viewports and still clears the copy on short ones. */}
+      {renderCanvas && (
       <div style={{ position: "absolute", inset: 0 }}>
         <ParticleVortex
           density={density}
@@ -256,6 +205,7 @@ export default function HeroVortex({
           onSplash={handleSplash}
         />
       </div>
+      )}
 
       {/* Grain over the render, under the type. */}
       <div

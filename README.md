@@ -66,6 +66,9 @@ Three layers, all driven from the same pointer state so they stay in register:
   screen and scrolls to the next section at the same time. The burst propagates
   outward from the click, so particles nearest your cursor leave first, then
   reconverges as the page settles.
+- **Morph** — while that happens the field's target form migrates from the
+  vortex to a ridged terrain, so the particles that scattered out of the hero
+  are the ones that collect into the landscape below. See *Carrying the field*.
 - **Parallax** — the scene takes a slow yaw and pitch from the pointer. The
   vitrine flexes at a third of the particle response, so the cage reads as
   rigid rather than billowing with the cloud.
@@ -73,6 +76,41 @@ Three layers, all driven from the same pointer state so they stay in register:
 `prefers-reduced-motion: reduce` renders a composed still — no drift, no flow —
 that still answers the pointer, and drops to the `low` particle count. Clicking
 still advances the page, but it jumps rather than bursting and gliding.
+
+## Carrying the field between sections
+
+`VortexScene` puts one canvas, fixed to the viewport, behind every section it
+wraps. Scroll position drives a `morph` uniform on the field: `0` is the hero's
+vortex, `1` is the terrain. Because it is one canvas and one particle buffer
+throughout, the points that scatter out of the hero are literally the points
+that reassemble below — not a second field that resembles the first.
+
+```tsx
+<VortexScene onSplash={advance}>
+  <HeroVortex renderCanvas={false} />
+  <section id="next">…</section>
+</VortexScene>
+```
+
+`renderCanvas={false}` tells `HeroVortex` to draw only its chrome — key light,
+grain, HUD, copy — and leave the sculpture to the scene. Sections inside a
+`VortexScene` must be transparent, or they paint over the field behind them;
+the scene owns the page background.
+
+The two forms share a lattice but read its axes differently. In the vortex,
+strand index is the angle and samples run along each strand. In the terrain,
+samples wrap the circle — so every ring is drawn by hundreds of points and
+bands into a contour line — while strand index steps outward as concentric
+rings. Mapping it the other way gives ~220 points per ring, which scatters into
+noise rather than banding.
+
+| `VortexScene` prop | Default | What it does |
+| --- | --- | --- |
+| `morphSpan` | `1` | Viewports of scrolling the morph takes. `1` completes it as the second section fills the screen. |
+| `background` | `#06070C` | The ground the field is drawn against. |
+| `onSplash` | — | Fires on click; wire it to `useAdvanceScroll`. |
+
+Plus `density`, `color`, `accentColor` and `lineColor`, passed through.
 
 ## Props
 
@@ -93,6 +131,9 @@ still advances the page, but it jumps rather than bursting and gliding.
 | `repelStrength` | `0.09` | How far the cursor pushes particles aside. |
 | `showVitrine` | `true` | Draw the nested wireframe prisms. |
 | `clickPulse` | `true` | Emit a pulse ring on press. |
+| `morph` | `0` | Static blend: `0` vortex, `1` terrain. |
+| `morphSource` | — | Read once per frame instead, for scroll-driven blends. |
+| `showRing` | `true` | Draw the eclipse ring at the centre of the terrain. |
 | `splashOnClick` | `false` | Burst the whole field across the screen on press. |
 | `splashStrength` | `1.15` | How far the burst throws particles, in NDC units. |
 | `splashDuration` | `1.15` | Seconds for the burst to travel out and settle. |

@@ -176,6 +176,11 @@ uniform float uPulse;
 uniform float uSplash;
 uniform vec2 uSplashOrigin;
 uniform float uSplashStrength;
+uniform float uMorph;
+uniform float uTerrainRadius;
+uniform float uTerrainAmp;
+uniform float uTerrainScale;
+uniform float uTerrainDrop;
 
 out float vAlpha;
 out float vHeat;
@@ -250,6 +255,45 @@ void main() {
   pos += (aRand - 0.5) * dust * vec3(2.4, 1.7, 2.4);
   pos.y -= dust * aRand.y * 0.8;
 
+  /* ── Terrain, the form the field collects into ──────────────────────────
+     A polar grid, with the lattice's two axes swapped relative to the vortex:
+     the long axis (samples along a strand) wraps the circle, so each ring is
+     drawn by hundreds of points and reads as a continuous contour band, and
+     the short axis (strand index) steps outward as concentric rings. Mapping
+     it the other way round gives only ~220 points per ring, which scatters
+     into noise instead of banding. */
+  if (uMorph > 0.001) {
+    float rn = 0.06 + a * 0.94;
+    float trad = rn * uTerrainRadius;
+    float tth = t * TAU + uTime * uSpin * 0.1;
+    vec2 tp = vec2(cos(tth), sin(tth)) * trad;
+
+    // Ridged fbm: inverting |noise| turns smooth hills into sharp crests.
+    // Three broad octaves, not four narrow ones — more of them shatters the
+    // range into a field of spikes.
+    float h = 0.0;
+    float ampf = 1.0;
+    float frq = uTerrainScale;
+    for (int i = 0; i < 3; i++) {
+      float n = snoise(vec3(tp * frq, uTime * 0.04 + float(i) * 7.3));
+      h += (1.0 - abs(n)) * ampf;
+      ampf *= 0.42;
+      frq *= 2.1;
+    }
+    h = (h - 1.0) * uTerrainAmp;
+
+    // A hollow at the centre for the ring to sit in, and a fade at the rim so
+    // the far edge dissolves into scattered points instead of cutting off.
+    h *= smoothstep(0.06, 0.24, rn) * (1.0 - smoothstep(0.76, 1.0, rn));
+
+    vec3 terrain = vec3(tp.x, h - uTerrainDrop, tp.y);
+
+    // Ease the swap so particles accelerate out of the vortex and settle into
+    // the landscape rather than sliding between the two at constant speed.
+    float m = uMorph * uMorph * (3.0 - 2.0 * uMorph);
+    pos = mix(pos, terrain, m);
+  }
+
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   vec4 clip = projectionMatrix * mv;
 
@@ -271,6 +315,9 @@ void main() {
   // Peaks at the waist (the readable dot grid) and thins toward the mouth,
   // which is what separates the veil from the cloth in the reference.
   float sizeCurve = mix(0.95, 1.5, band) * mix(1.0, 0.55, smoothstep(0.5, 1.0, v));
+  // The terrain wants an even, finer grid — the vortex's profile weighting
+  // would blotch it.
+  sizeCurve = mix(sizeCurve, 0.82, uMorph);
   gl_PointSize = uSize * uDpr * sizeCurve * (0.62 + aRand.x * 0.8) * (uCamDist * 0.62 / dist);
   gl_PointSize = clamp(gl_PointSize, 0.6, 14.0);
 
@@ -278,7 +325,7 @@ void main() {
   // the column readable instead of washing into a solid mass.
   float fog = clamp((uCamDist + 6.0 - dist) / 10.0, 0.0, 1.0);
   float facing = mix(0.3, 1.0, smoothstep(uCamDist + 2.6, uCamDist - 3.0, dist));
-  float veil = mix(1.0, 1.65, smoothstep(uWaist, 0.95, v));
+  float veil = mix(mix(1.0, 1.65, smoothstep(uWaist, 0.95, v)), 1.15, uMorph);
   vAlpha = fog * facing * uBrightness * veil * (0.55 + aRand.y * 0.6) * (1.0 - dust * 0.3);
   // Mid-splash the field is spread across the whole screen, far from where the
   // fog was calibrated, so lift it back toward full brightness as it flies.
@@ -422,6 +469,46 @@ const buildVitrine = (shells: number, w: number, h: number, d: number) => {
   };
 };
 
+
+/* ── Eclipse ring ─────────────────────────────────────────────────────────
+   The bright annulus at the centre of the terrain. Screen-space on a
+   fullscreen triangle, so it stays a perfect circle at any resolution. */
+
+const ringVertex = `#version 300 es
+precision highp float;
+in vec2 position;
+void main() { gl_Position = vec4(position, 0.0, 1.0); }
+`;
+
+const ringFragment = `#version 300 es
+precision highp float;
+
+uniform vec2 iResolution;
+uniform vec2 uCenter;
+uniform float uRadius;
+uniform float uMorph;
+uniform vec3 uColor;
+
+out vec4 fragColor;
+
+void main() {
+  vec2 ndc = (gl_FragCoord.xy / iResolution) * 2.0 - 1.0;
+  vec2 d = ndc - uCenter;
+  d.x *= iResolution.x / iResolution.y;
+  float r = length(d);
+
+  // A thin bright rim with a dark core, plus a wide falloff that lifts the
+  // terrain immediately around it.
+  float rim = exp(-pow((r - uRadius) / (uRadius * 0.075), 2.0));
+  float halo = exp(-pow(r / (uRadius * 1.7), 2.0)) * 0.16;
+  float core = 1.0 - smoothstep(uRadius * 0.72, uRadius * 0.94, r);
+
+  float a = (rim + halo * (1.0 - core)) * uMorph;
+  a = clamp(a, 0.0, 1.0);
+  fragColor = vec4(uColor * a, a);
+}
+`;
+
 /* Vitrine half-width, full height and half-depth, in scene units. The scene is
    uniformly scaled to fit the viewport, so these only set proportions. */
 const VITRINE_W = 2.5;
@@ -465,6 +552,17 @@ export interface ParticleVortexProps {
   splashDuration?: number;
   /** Fired the moment a splash starts — use it to advance the page. */
   onSplash?: () => void;
+  /** 0 = vortex, 1 = terrain. Static blend between the two forms. */
+  morph?: number;
+  /** Read once per frame for the morph, for scroll-driven blends. Overrides
+   *  `morph` when given — it avoids a React render per scroll event. */
+  morphSource?: () => number;
+  /** Draw the eclipse ring at the centre of the terrain. */
+  showRing?: boolean;
+  /** Where pointer events are listened for. "container" is right when the
+   *  canvas is the top layer. Use "window" when content sits above the canvas
+   *  and would otherwise swallow every click before it arrives. */
+  pointerScope?: "container" | "window";
   style?: React.CSSProperties;
   className?: string;
 }
@@ -487,21 +585,27 @@ export default function ParticleVortex({
   splashStrength = 1.15,
   splashDuration = 1.15,
   onSplash,
+  morph = 0,
+  morphSource,
+  showRing = true,
+  pointerScope = "container",
   style,
   className,
 }: ParticleVortexProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const ctxRef = useRef<{ points: Program; lines: Program } | null>(null);
+  const ctxRef = useRef<{ points: Program; lines: Program; ring: Program } | null>(null);
 
   const propsRef = useRef({
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
+    morph, morphSource, showRing,
   });
   propsRef.current = {
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
+    morph, morphSource, showRing,
   };
 
   const applyProps = () => {
@@ -521,6 +625,7 @@ export default function ParticleVortex({
       arr[0] = v[0]; arr[1] = v[1]; arr[2] = v[2];
     };
     set(u.uColor.value, p.color);
+    if (ctx.ring) set((ctx.ring.uniforms as any).uColor.value, p.color);
     set(u.uAccent.value, p.accentColor);
     const l = ctx.lines.uniforms as any;
     l.uRepel.value = p.repelStrength;
@@ -618,6 +723,11 @@ export default function ParticleVortex({
         uSplash: { value: 0 },
         uSplashOrigin: { value: new Float32Array([0, 0]) },
         uSplashStrength: { value: 1.15 },
+        uMorph: { value: 0 },
+        uTerrainRadius: { value: 9.4 },
+        uTerrainAmp: { value: 6.4 },
+        uTerrainScale: { value: 0.115 },
+        uTerrainDrop: { value: 2.2 },
       },
     });
     const points = new Mesh(gl, { geometry: pointGeometry, program: pointProgram, mode: gl.POINTS });
@@ -648,8 +758,35 @@ export default function ParticleVortex({
     const lines = new Mesh(gl, { geometry: lineGeometry, program: lineProgram, mode: gl.LINES });
     lines.setParent(scene);
 
-    ctxRef.current = { points: pointProgram, lines: lineProgram };
+    // Screen-space, so it hangs outside the scene graph and is drawn by hand
+    // after the field rather than being transformed with it.
+    const ringGeometry = new Geometry(gl, {
+      position: { size: 2, data: new Float32Array([-1, -1, 3, -1, -1, 3]) },
+    });
+    const ringProgram = new Program(gl, {
+      vertex: ringVertex,
+      fragment: ringFragment,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        iResolution: { value: new Float32Array([1, 1]) },
+        uCenter: { value: new Float32Array([0, 0]) },
+        uRadius: { value: 0.055 },
+        uMorph: { value: 0 },
+        uColor: { value: new Float32Array([1, 1, 1]) },
+      },
+    });
+    const ring = new Mesh(gl, { geometry: ringGeometry, program: ringProgram });
+
+    ctxRef.current = { points: pointProgram, lines: lineProgram, ring: ringProgram };
     applyProps();
+
+    // Declared ahead of setSize, which runs during setup and assigns terrainR.
+    let terrainR = 5;
+    const camZ = camera.position.z;
+    const camY = camera.position.y;
+    const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
     const setSize = () => {
       const rect = container.getBoundingClientRect();
@@ -669,10 +806,16 @@ export default function ParticleVortex({
       // fit plane and therefore projects larger than the centre slice.
       const fit = Math.min((visH * 0.82) / VITRINE_H, (visW * 0.58) / (VITRINE_W * 2));
       scene.scale.set(fit, fit, fit);
+      // The terrain camera is placed relative to the fitted disc, so the
+      // landscape frames the same way at every viewport.
+      terrainR = fit * (pointProgram.uniforms.uTerrainRadius.value as number);
 
       (pointProgram.uniforms.uCamDist.value as number) = camera.position.z;
       (pointProgram.uniforms.uAspect.value as number) = aspect;
       (lineProgram.uniforms.uAspect.value as number) = aspect;
+      const res = ringProgram.uniforms.iResolution.value as Float32Array;
+      res[0] = gl.drawingBufferWidth;
+      res[1] = gl.drawingBufferHeight;
     };
     const ro = new ResizeObserver(setSize);
     ro.observe(container);
@@ -686,7 +829,13 @@ export default function ParticleVortex({
     let pulse = 0;
     let splash = 0;
 
-    const host = (container.parentElement || container) as HTMLElement;
+    const host: HTMLElement | Window =
+      pointerScope === "window" ? window : ((container.parentElement || container) as HTMLElement);
+
+    // Clicking a link or a control should do that, not burst the field.
+    const INTERACTIVE = "a, button, input, textarea, select, label, [data-no-splash]";
+    const isInteractive = (e: PointerEvent) =>
+      e.target instanceof Element && e.target.closest(INTERACTIVE) !== null;
 
     const onMove = (e: PointerEvent) => {
       const rect = container.getBoundingClientRect();
@@ -698,6 +847,7 @@ export default function ParticleVortex({
     const onDown = (e: PointerEvent) => {
       const p = propsRef.current;
       if (!p.clickPulse && !p.splashOnClick) return;
+      if (isInteractive(e)) return;
       onMove(e);
       // Snap the smoothed cursor to the press so the burst starts exactly
       // under the finger rather than wherever the easing had got to.
@@ -716,19 +866,27 @@ export default function ParticleVortex({
       }
     };
 
-    host.addEventListener("pointermove", onMove, { passive: true });
-    host.addEventListener("pointerleave", onLeave, { passive: true });
-    host.addEventListener("pointerdown", onDown, { passive: true });
+    host.addEventListener("pointermove", onMove as EventListener, { passive: true });
+    host.addEventListener("pointerleave", onLeave as EventListener, { passive: true });
+    host.addEventListener("pointerdown", onDown as EventListener, { passive: true });
 
     let raf = 0;
     let isVisible = true;
     let isPageVisible = !document.hidden;
     let last = performance.now();
+    let morphNow = 0;
     // Reduced motion still gets a still frame plus pointer response, never drift.
     let clock = reduceMotion ? 6 : 0;
 
     const render = () => {
       renderer.render({ scene, camera });
+      // Drawn after the scene so the ring sits over the field, and separately
+      // from it because its geometry is in clip space, not world space.
+      if ((ringProgram.uniforms.uMorph.value as number) > 0.001) {
+        // clear:false — a second render would otherwise wipe the field that
+        // was just drawn. No camera: the ring's geometry is already clip-space.
+        renderer.render({ scene: ring, clear: false, sort: false, frustumCull: false });
+      }
     };
 
     const loop = (t: number) => {
@@ -743,9 +901,21 @@ export default function ParticleVortex({
       pulse = Math.max(0, pulse - dt * 0.85);
       splash = Math.max(0, splash - dt / Math.max(p.splashDuration, 0.05));
 
+      const target = p.morphSource ? p.morphSource() : p.morph;
+      morphNow += (Math.max(0, Math.min(1, target)) - morphNow) * 0.14;
+
       const parallax = reduceMotion ? 0 : p.parallaxStrength;
-      scene.rotation.y = mouse[0] * parallax * 0.32;
-      scene.rotation.x = -mouse[1] * parallax * 0.14;
+      // The terrain is read from much closer to its own surface, so the
+      // parallax yaw has to shrink or the horizon swings wildly.
+      scene.rotation.y = mouse[0] * parallax * (0.32 - morphNow * 0.24);
+      scene.rotation.x = -mouse[1] * parallax * (0.14 - morphNow * 0.09);
+
+      /* Drop the camera to near ground level and pull it back to the edge of
+         the disc, so the far side of the terrain stacks up the frame as a
+         range instead of being read down into as a bowl. */
+      camera.position.y = lerp(camY, terrainR * 0.13, morphNow);
+      camera.position.z = lerp(camZ, terrainR * 0.78, morphNow);
+      camera.lookAt([0, lerp(0, terrainR * 0.05, morphNow), lerp(0, -terrainR * 0.3, morphNow)]);
 
       const pu = pointProgram.uniforms as any;
       pu.uTime.value = clock;
@@ -757,8 +927,19 @@ export default function ParticleVortex({
       const lu = lineProgram.uniforms as any;
       lu.uPointerIn.value = pointerIn;
       lu.uPulse.value = pulse;
-      lu.uOpacity.value = p.showVitrine ? 0.3 : 0;
+      // The cage belongs to the hero; it has no business around a landscape.
+      lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * (1 - morphNow);
       (lu.uMouse.value as Float32Array).set(mouse);
+
+      pu.uMorph.value = morphNow;
+
+      const ru = ringProgram.uniforms as any;
+      // Fades in over the back half of the morph, once there is a terrain for
+      // it to sit in.
+      ru.uMorph.value = p.showRing ? Math.max(0, (morphNow - 0.45) / 0.55) : 0;
+      const rc = ru.uCenter.value as Float32Array;
+      rc[0] = mouse[0] * parallax * 0.05;
+      rc[1] = -0.06 + mouse[1] * parallax * 0.03;
 
       render();
       raf = requestAnimationFrame(loop);
@@ -790,16 +971,16 @@ export default function ParticleVortex({
       ro.disconnect();
       io.disconnect();
       document.removeEventListener("visibilitychange", onVis);
-      host.removeEventListener("pointermove", onMove);
-      host.removeEventListener("pointerleave", onLeave);
-      host.removeEventListener("pointerdown", onDown);
+      host.removeEventListener("pointermove", onMove as EventListener);
+      host.removeEventListener("pointerleave", onLeave as EventListener);
+      host.removeEventListener("pointerdown", onDown as EventListener);
       ctxRef.current = null;
       try { container.removeChild(canvas); } catch (e) {}
       const ext = gl.getExtension("WEBGL_lose_context");
       if (ext) ext.loseContext();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [density]);
+  }, [density, pointerScope]);
 
   return (
     <div
