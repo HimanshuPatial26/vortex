@@ -165,17 +165,34 @@ framework, a second set of conventions and a second bundle alongside a renderer
 that already does all of it — GPU-side geometry, custom shaders, explicit
 disposal.
 
-Three layers share one context and, critically, one `terrainHeight` function:
-terrain points, contour lines, haze. They are layers rather than three
-components because the lines have to sit exactly on the surface the points
-describe; split across components they would need either three GL contexts or a
-great deal of plumbing to stay in sync.
+Three layers share one context and one height field: terrain points, contour
+lines, haze. They are layers rather than three components because the lines have
+to sit exactly on the surface the points describe; split across components they
+would need either three GL contexts or a great deal of plumbing to stay in sync.
 
 The height field is `fbm + ridged + medium + fine`, multiplied by a band that
-places the mass in the middle distance and a peak mask that raises one summit
-above the rest. It is evaluated in the vertex shader, never on the CPU — which
-is what makes the idle deformation free: nothing is re-uploaded, the range
-simply breathes because its noise is sampled against time.
+places the mass in the middle distance and by peak masks that carry the two
+summits. Masks alone only amplify whatever noise happens to sit under them, so
+each summit also adds a lift dome — otherwise a shoulder can out-top the peak
+you asked for. Flanks fall off asymmetrically (the left slope reaches further
+than the right) so the range never reads as a mirrored pair. It is all evaluated
+in the vertex shader, never on the CPU — which is what makes the idle
+deformation free: nothing is re-uploaded, the range simply breathes because its
+noise is sampled against time.
+
+Points read the full four-octave field; **lines and surface normals read a
+two-octave `terrainSmooth` instead**. That split is what keeps the section from
+looking triangulated: constant-depth slices over a ridged surface zigzag hard
+enough to cross each other into a mesh, and a mesh is the one thing this should
+never look like. On the smooth surface the same slices flow — `~~~~` rather than
+`/\/\/\` — while the points keep every bit of the detail. Smooth normals also
+produce much gentler slopes, so the slope-driven density had to be recalibrated
+against them; the particles, not the lines, carry the mass.
+
+A screen-space `copyGuard` dims the field where the editorial block sits. A
+scrim over the canvas would flatten that whole corner; dimming the particles
+themselves keeps the terrain present behind the type without competing with
+it.
 
 Contours are slices at constant *depth*, not true iso-height curves. Marching an
 isoline every frame over a terrain that moves would cost a rebuild per frame; a
@@ -184,9 +201,10 @@ the two are indistinguishable — rows crowd in screen space exactly where a
 contour map tightens its bands.
 
 Every tunable is in the exported `MOUNTAIN` object at the top of the file:
-geometry, the four noise amplitudes, band and peak placement, particle size and
-density, contour count and opacity, haze, camera, scroll push, pointer radius
-and force. Pass `config` to override any of them.
+geometry, the four noise amplitudes, band placement, both peaks and their lifts,
+edge falloff, particle size and valley thinning, contour count and opacity,
+haze, camera, scroll push, pointer radius and force. Pass `config` to override
+any of them.
 
 Mobile drops to a coarser grid, fewer contours and no pointer displacement, and
 lines the camera up on the summit rather than the range's centre — a narrow

@@ -65,7 +65,10 @@ export default function Page() {
             zIndex: 2,
             pointerEvents: "none",
             background:
-              "radial-gradient(78% 46% at 4% 100%, rgba(5,7,10,0.92), rgba(5,7,10,0.5) 42%, transparent 72%)",
+              [
+                "linear-gradient(to top, rgba(5,7,10,0.96) 0%, rgba(5,7,10,0.72) 14%, transparent 34%)",
+                "radial-gradient(62% 52% at 2% 92%, rgba(5,7,10,0.95), rgba(5,7,10,0.55) 46%, transparent 76%)",
+              ].join(","),
           }}
         />
 

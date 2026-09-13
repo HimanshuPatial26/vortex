@@ -36,18 +36,18 @@ import { SIMPLEX_3D } from "../lib/noise";
 export const MOUNTAIN = {
   /* Geometry */
   terrainWidth: 150,
-  nearZ: 26,
+  nearZ: 10,
   farZ: -110,
   /** Grid resolution. cols × rows is the particle count. */
-  cols: 380,
-  rows: 210,
+  cols: 460,
+  rows: 250,
 
   /* Height field. The range is large-scale mass plus ridges plus detail,
      multiplied by a band that puts the mountains in the middle distance and a
      peak mask that raises one summit above the rest. */
   noiseScale: 0.0105,
-  ampLarge: 8.5,
-  ampRidge: 10.0,
+  ampLarge: 6.4,
+  ampRidge: 7.4,
   ampMedium: 2.4,
   ampFine: 0.7,
   /** Baseline gain, so the foreground still rolls instead of lying flat. */
@@ -55,46 +55,56 @@ export const MOUNTAIN = {
   /** Where the mountain mass sits in depth, and how far it reaches. */
   bandZ: -46,
   bandWidth: 34,
-  bandGain: 0.7,
+  bandGain: 0.58,
   /** The hero summit: its centre, its footprint, and how far it out-tops the
       surrounding ridges. */
-  peakX: -4,
+  peakX: 7,
   peakZ: -44,
   peakWidth: 27,
   peakDepth: 21,
-  peakGain: 3.1,
+  peakGain: 1.9,
+  /** A narrower shoulder beside the summit, so the range is not one pyramid. */
+  peak2X: 26,
+  peak2Z: -52,
+  peak2Width: 13,
+  peak2Depth: 13,
+  peak2Gain: 1.15,
+  /** Height added outright at each summit, so one exists wherever the noise
+   *  happens to fall. A multiplicative mask alone cannot guarantee that. */
+  peakLift: 7,
+  peak2Lift: 3.5,
   /** Where the range fades out at the left and right edges of the field. */
   edgeStart: 0.36,
   edgeEnd: 0.5,
 
   /* Particles */
-  pointSize: 3.6,
+  pointSize: 2.0,
   /** Fraction of points kept in the flats; ridges always keep all of theirs. */
-  valleyThin: 0.55,
-  brightness: 1.2,
+  valleyThin: 0.42,
+  brightness: 1.9,
 
   /* Contours */
-  contourCount: 86,
-  contourOpacity: 0.3,
+  contourCount: 52,
+  contourOpacity: 0.2,
 
   /* Haze */
-  hazeCount: 900,
-  hazeOpacity: 0.05,
+  hazeCount: 300,
+  hazeOpacity: 0.035,
 
   /* Camera */
-  camY: 9,
+  camY: 13,
   camZ: 36,
-  aimY: 8,
+  aimY: 12,
   aimZ: -46,
-  fov: 38,
+  fov: 44,
   /** How far the camera pushes into the range across the section's scroll. */
   scrollPush: 26,
 
   /* Motion */
   idleSpeed: 0.035,
   parallax: 1.0,
-  pointerRadius: 0.3,
-  pointerForce: 0.1,
+  pointerRadius: 0.42,
+  pointerForce: 0.075,
 
   /* Quality */
   maxDpr: 2,
@@ -119,6 +129,11 @@ uniform float uBandGain;
 uniform vec2 uPeakAt;
 uniform vec2 uPeakSize;
 uniform float uPeakGain;
+uniform vec2 uPeak2At;
+uniform vec2 uPeak2Size;
+uniform float uPeak2Gain;
+uniform float uPeakLift;
+uniform float uPeak2Lift;
 uniform float uEdge0;
 uniform float uEdge1;
 uniform float uHalfWidth;
@@ -131,6 +146,11 @@ float fbm(vec2 p, float t) {
     f *= 2.03;
   }
   return s;
+}
+
+/* Two octaves only — the smooth counterpart used by the contour lines. */
+float fbm2(vec2 p, float t) {
+  return snoise(vec3(p, t)) * 0.5 + snoise(vec3(p * 2.03, t)) * 0.25;
 }
 
 /* Ridged noise: inverting |noise| turns rounded hills into sharp crests, which
@@ -149,6 +169,33 @@ float ridged(vec2 p, float t) {
   return s / norm;
 }
 
+float ridged2(vec2 p, float t) {
+  float r0 = 1.0 - abs(snoise(vec3(p, t)));
+  float r1 = 1.0 - abs(snoise(vec3(p * 2.11, t)));
+  return (r0 * r0 * 0.5 + r1 * r1 * 0.24) / 0.74;
+}
+
+/* The masks that turn a noise field into a range: mass in the middle distance,
+   one dominant summit, a narrower shoulder beside it, and a fade at the flanks.
+   Shared, so the smooth and detailed forms describe the same mountain. */
+/* Returns the mask, and writes the added summit domes into the out param. */
+float terrainMask(vec2 p, out float lift) {
+  float band = exp(-pow((p.y - uBandZ) / uBandWidth, 2.0));
+  vec2 d = (p - uPeakAt) / uPeakSize;
+  float peak = exp(-dot(d, d));
+  // A second, narrower summit off the main one. Without it the range resolves
+  // into a single pyramid however the noise falls.
+  vec2 d2 = (p - uPeak2At) / uPeak2Size;
+  float peak2 = exp(-dot(d2, d2));
+  float m = uBaseGain + band * uBandGain + peak * uPeakGain + peak2 * uPeak2Gain;
+  lift = peak * uPeakLift + peak2 * uPeak2Lift;
+  // Asymmetric flanks — equal falloff on both sides reads as a diagram.
+  float ex = p.x < 0.0 ? abs(p.x) * 1.12 : abs(p.x) * 0.9;
+  float edge = 1.0 - smoothstep(uEdge0 * uHalfWidth, uEdge1 * uHalfWidth, ex);
+  lift *= edge;
+  return m * edge;
+}
+
 /* p is (x, z) in scene units. Time drifts the field so the range breathes. */
 float terrainHeight(vec2 p, float t) {
   vec2 n = p * uNoiseScale;
@@ -156,25 +203,32 @@ float terrainHeight(vec2 p, float t) {
   h += ridged(n * 1.15 + 11.3, t) * uAmpRidge;
   h += fbm(n * 4.1 + 31.0, t * 1.3) * uAmpMedium;
   h += fbm(n * 11.0 + 71.0, t * 1.7) * uAmpFine;
+  float lift;
+  float m = terrainMask(p, lift);
+  return max(h * m + lift, -1.5);
+}
 
-  // Mass in the middle distance, so the foreground stays low and readable.
-  float band = exp(-pow((p.y - uBandZ) / uBandWidth, 2.0));
-  // One summit above the rest.
-  vec2 d = (p - uPeakAt) / uPeakSize;
-  float peak = exp(-dot(d, d));
-  h *= uBaseGain + band * uBandGain + peak * uPeakGain;
-
-  // Fade the range out at the sides rather than cutting it off.
-  h *= 1.0 - smoothstep(uEdge0 * uHalfWidth, uEdge1 * uHalfWidth, abs(p.x));
-  return max(h, -1.5);
+/* The same mountain read at low detail. Contour lines follow this rather than
+   the full field: a slice across the detailed surface spikes on every crest and
+   crosses its neighbours into what looks like a triangulated mesh. Dropping the
+   fine octaves gives lines that flow along the mass instead of zig-zagging over
+   it. Normals use it too — broad shading wants the broad shape, and it costs
+   half as many noise samples. */
+float terrainSmooth(vec2 p, float t) {
+  vec2 n = p * uNoiseScale;
+  float h = fbm2(n, t) * uAmpLarge * 1.05;
+  h += ridged2(n * 1.15 + 11.3, t) * uAmpRidge * 0.86;
+  float lift;
+  float m = terrainMask(p, lift);
+  return max(h * m + lift, -1.5);
 }
 
 /* Surface normal by finite difference. Two extra height samples, which is what
    pays for the ridge brightening and the density weighting. */
 vec3 terrainNormal(vec2 p, float t, float e) {
-  float h = terrainHeight(p, t);
-  float hx = terrainHeight(p + vec2(e, 0.0), t);
-  float hz = terrainHeight(p + vec2(0.0, e), t);
+  float h = terrainSmooth(p, t);
+  float hx = terrainSmooth(p + vec2(e, 0.0), t);
+  float hz = terrainSmooth(p + vec2(0.0, e), t);
   return normalize(vec3((h - hx) / e, 1.0, (h - hz) / e));
 }
 `;
@@ -182,6 +236,15 @@ vec3 terrainNormal(vec2 p, float t, float e) {
 /* Screen-space pointer push, shared by the points and the lines so both answer
    the same cursor. */
 const POINTER = `
+/* Copy guard: the field dims where the editorial block sits. A scrim over the
+   canvas would flatten the whole corner; dimming the particles themselves keeps
+   the terrain present behind the type without ever competing with it. */
+float copyGuard(vec2 ndc) {
+  float gx = smoothstep(0.12, -0.5, ndc.x);
+  float gy = smoothstep(0.06, -0.52, ndc.y);
+  return 1.0 - 0.72 * gx * gy;
+}
+
 uniform vec2 uMouse;
 uniform float uAspect;
 uniform float uPointerIn;
@@ -233,7 +296,7 @@ void main() {
   vec3 nrm = terrainNormal(p, uTime, 1.1);
   // Slope, 0 flat to 1 sheer. Ridges and faces read bright; flats sit back.
   float slope = clamp(1.0 - nrm.y, 0.0, 1.0);
-  float steep = smoothstep(0.06, 0.55, slope);
+  float steep = smoothstep(0.015, 0.3, slope);
 
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   vec4 clip = projectionMatrix * mv;
@@ -243,19 +306,28 @@ void main() {
   clip.xy = ndc * clip.w;
   gl_Position = clip;
 
-  gl_PointSize = clamp(uPointSize * uDpr * (0.7 + aRand.z * 0.6) * (uCamDist * 1.5 / dist), 1.0, 3.2);
+  gl_PointSize = clamp(uPointSize * uDpr * (0.72 + aRand.z * 0.5) * (uCamDist * 1.5 / dist), 0.55, 1.9);
 
   /* Density is carried by alpha, not by count: thinning the buffer would mean
      rebuilding it whenever the terrain moved. A share of the flat-ground points
      drop out, ridges keep all of theirs. */
-  float keep = step(aRand.z, mix(uValleyThin, 1.0, steep));
+  // Density follows the terrain: full on ridges and faces, thinned hard in the
+  // flats and valleys where the reference has almost nothing.
+  float keep = step(aRand.z, mix(uValleyThin, 1.0, steep * 1.3));
   // Distance haze — the far range has to sink into the dark or the whole field
   // reads as one flat sheet of dots.
   float fog = 1.0 - smoothstep(uCamDist * 1.7, uCamDist * 4.6, dist);
   // A slow shimmer, well under the threshold where it reads as blinking.
   float shimmer = 0.86 + 0.14 * sin(uTime * 11.0 + aRand.x * 62.8);
 
-  vAlpha = keep * fog * uBrightness * uReveal * shimmer * (0.42 + steep * 0.95);
+  /* Opacity carries the depth: a wide per-particle spread so the mass reads as
+     layered rather than as one flat sheet, weighted up on the steep ground and
+     again on the summit itself, which the reference shows as the brightest
+     accumulation in the frame. */
+  vec2 sd = (p - uPeakAt) / (uPeakSize * 1.35);
+  float summit = exp(-dot(sd, sd));
+  float weight = mix(0.18, 0.95, aRand.y) * (0.45 + steep * 1.1 + summit * 0.55);
+  vAlpha = keep * fog * uBrightness * uReveal * shimmer * weight * copyGuard(ndc);
 }
 `;
 
@@ -298,11 +370,11 @@ out float vAlpha;
 
 void main() {
   vec2 p = aCell;
-  float h = terrainHeight(p, uTime);
+  float h = terrainSmooth(p, uTime);
   vec3 pos = vec3(p.x, h, p.y);
 
   vec3 nrm = terrainNormal(p, uTime, 1.1);
-  float steep = smoothstep(0.05, 0.5, clamp(1.0 - nrm.y, 0.0, 1.0));
+  float steep = smoothstep(0.015, 0.28, clamp(1.0 - nrm.y, 0.0, 1.0));
 
   vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   vec4 clip = projectionMatrix * mv;
@@ -317,7 +389,10 @@ void main() {
      so the reveal reads as the terrain being surveyed. */
   float order = clamp((p.y - uBandZ * 2.2) / 150.0, 0.0, 1.0);
   float drawn = clamp((uReveal - 0.08) * 2.4 - (1.0 - order) * 0.45, 0.0, 1.0);
-  vAlpha = fog * drawn * (0.32 + steep * 0.95) * (0.7 + aSeed * 0.5);
+  // Each line breathes on its own long cycle and some drop out entirely for a
+  // while, which is what keeps the set from reading as a ruled grid.
+  float life = 0.45 + 0.55 * sin(uTime * (7.0 + aSeed * 9.0) + aSeed * 40.0);
+  vAlpha = fog * drawn * (0.3 + steep * 0.8) * (0.55 + aSeed * 0.5) * clamp(life, 0.0, 1.0) * copyGuard(ndc);
 }
 `;
 
@@ -478,6 +553,11 @@ export default function ParticleMountain({
       uPeakAt: { value: new Float32Array([C.peakX, C.peakZ]) },
       uPeakSize: { value: new Float32Array([C.peakWidth, C.peakDepth]) },
       uPeakGain: { value: C.peakGain },
+      uPeak2At: { value: new Float32Array([C.peak2X, C.peak2Z]) },
+      uPeak2Size: { value: new Float32Array([C.peak2Width, C.peak2Depth]) },
+      uPeak2Gain: { value: C.peak2Gain },
+      uPeakLift: { value: C.peakLift },
+      uPeak2Lift: { value: C.peak2Lift },
       uEdge0: { value: C.edgeStart },
       uEdge1: { value: C.edgeEnd },
       uHalfWidth: { value: halfW },

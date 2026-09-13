@@ -125,13 +125,13 @@ export default function MountainHUD({
   gridLabel = "GRID // 1000M",
   children,
 }: MountainHUDProps) {
-  const dim = { color: color.textMono, opacity: 0.9 };
+  const dim = { color: color.textMono, opacity: 0.72 };
 
   return (
     <div
       aria-hidden
       className="pm-hud"
-      style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2 }}
+      style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2, opacity: 0.62 }}
     >
       {/* Top left: title, keyword stack, dot matrix. */}
       <div style={{ position: "absolute", top: "clamp(22px, 4vh, 40px)", left: "clamp(18px, 3vw, 40px)" }}>
