@@ -19,6 +19,7 @@
 
 import { useEffect, useRef } from "react";
 import { Renderer, Camera, Transform, Program, Mesh, Geometry } from "ogl";
+import { SIMPLEX_3D } from "../lib/noise";
 
 const hexToRgb = (hex: string): [number, number, number] => {
   const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -34,57 +35,9 @@ const densityToCount = (d: "low" | "medium" | "high") =>
 
 /* ── Shared GLSL ─────────────────────────────────────────────────────────── */
 
-/* Ashima simplex noise, trimmed to the 3D case. Drives the turbulence that
-   crumples the lattice into cloth at the waist and dust at the base. */
-const NOISE = `
-vec3 mod289(vec3 x){ return x - floor(x * (1.0/289.0)) * 289.0; }
-vec4 mod289(vec4 x){ return x - floor(x * (1.0/289.0)) * 289.0; }
-vec4 permute(vec4 x){ return mod289(((x*34.0)+1.0)*x); }
-vec4 taylorInvSqrt(vec4 r){ return 1.79284291400159 - 0.85373472095314 * r; }
-
-float snoise(vec3 v) {
-  const vec2 C = vec2(1.0/6.0, 1.0/3.0);
-  const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
-  vec3 i  = floor(v + dot(v, C.yyy));
-  vec3 x0 = v - i + dot(i, C.xxx);
-  vec3 g = step(x0.yzx, x0.xyz);
-  vec3 l = 1.0 - g;
-  vec3 i1 = min(g.xyz, l.zxy);
-  vec3 i2 = max(g.xyz, l.zxy);
-  vec3 x1 = x0 - i1 + C.xxx;
-  vec3 x2 = x0 - i2 + C.yyy;
-  vec3 x3 = x0 - D.yyy;
-  i = mod289(i);
-  vec4 p = permute(permute(permute(
-             i.z + vec4(0.0, i1.z, i2.z, 1.0))
-           + i.y + vec4(0.0, i1.y, i2.y, 1.0))
-           + i.x + vec4(0.0, i1.x, i2.x, 1.0));
-  float n_ = 0.142857142857;
-  vec3 ns = n_ * D.wyz - D.xzx;
-  vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
-  vec4 x_ = floor(j * ns.z);
-  vec4 y_ = floor(j - 7.0 * x_);
-  vec4 x = x_ * ns.x + ns.yyyy;
-  vec4 y = y_ * ns.x + ns.yyyy;
-  vec4 h = 1.0 - abs(x) - abs(y);
-  vec4 b0 = vec4(x.xy, y.xy);
-  vec4 b1 = vec4(x.zw, y.zw);
-  vec4 s0 = floor(b0) * 2.0 + 1.0;
-  vec4 s1 = floor(b1) * 2.0 + 1.0;
-  vec4 sh = -step(h, vec4(0.0));
-  vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
-  vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
-  vec3 p0 = vec3(a0.xy, h.x);
-  vec3 p1 = vec3(a0.zw, h.y);
-  vec3 p2 = vec3(a1.xy, h.z);
-  vec3 p3 = vec3(a1.zw, h.w);
-  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
-  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
-  vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
-  m = m * m;
-  return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
-}
-`;
+/* Drives the turbulence that crumples the lattice into cloth at the waist and
+   dust at the base. Shared with the mountain, which builds its terrain on it. */
+const NOISE = SIMPLEX_3D;
 
 /* Screen-space pointer forces, shared by the points and the vitrine so both
    react to the same cursor. Returns an NDC offset. */
@@ -701,6 +654,10 @@ export interface ParticleVortexProps {
   morphSource?: () => number;
   /** Draw the eclipse ring at the centre of the terrain. */
   showRing?: boolean;
+  /** Morph range over which this field hands the frame to something else and
+   *  fades out. Both ends land inside a handover, where the splash and the dive
+   *  already whiteout the composition, so the cross-fade is never seen. */
+  yieldRange?: [number, number] | null;
   /** Strength of the prismatic dispersion across the lit flank of the cloud.
    *  0 leaves the field monochrome. */
   spectrumStrength?: number;
@@ -737,6 +694,7 @@ export default function ParticleVortex({
   morphSource,
   splashAt,
   showRing = true,
+  yieldRange = null,
   spectrumStrength = 1,
   pointerScope = "container",
   style,
@@ -750,14 +708,14 @@ export default function ParticleVortex({
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
     morph, morphSource, showRing, spectrumStrength, splashAt,
-    travelOnSplash, travelDepth, travelFov,
+    travelOnSplash, travelDepth, travelFov, yieldRange,
   });
   propsRef.current = {
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
     morph, morphSource, showRing, spectrumStrength, splashAt,
-    travelOnSplash, travelDepth, travelFov,
+    travelOnSplash, travelDepth, travelFov, yieldRange,
   };
 
   const applyProps = () => {
@@ -1157,6 +1115,17 @@ export default function ParticleVortex({
         lastFov = wantFov;
       }
 
+      /* Yield: 1 normally, 0 across the range where another component owns the
+         frame, ramping over a quarter of a stage at each end. */
+      let yieldFade = 1;
+      if (p.yieldRange) {
+        const [y0, y1] = p.yieldRange;
+        const ramp = 0.25;
+        const rise = Math.max(0, Math.min(1, (morphNow - (y0 - ramp)) / ramp));
+        const fall = Math.max(0, Math.min(1, (morphNow - y1) / ramp));
+        yieldFade = 1 - rise * (1 - fall);
+      }
+
       const pu = pointProgram.uniforms as any;
       pu.uTime.value = clock;
       pu.uPointerIn.value = pointerIn;
@@ -1168,10 +1137,11 @@ export default function ParticleVortex({
       lu.uPointerIn.value = pointerIn;
       lu.uPulse.value = pulse;
       // The cage belongs to the hero; it has no business around a landscape.
-      lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * Math.max(0, 1 - morphNow);
+      lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * Math.max(0, 1 - morphNow) * yieldFade;
       (lu.uMouse.value as Float32Array).set(mouse);
 
       pu.uMorph.value = morphNow;
+      pu.uOpacity.value = p.opacity * yieldFade;
 
       const ru = ringProgram.uniforms as any;
       // Fades in over the back half of the morph, once there is a terrain for
@@ -1180,7 +1150,7 @@ export default function ParticleVortex({
       // take over.
       const ringIn = Math.max(0, Math.min(1, (morphNow - 0.45) / 0.55));
       const ringOut = Math.max(0, Math.min(1, (morphNow - 1.1) / 0.5));
-      ru.uMorph.value = p.showRing ? ringIn * (1 - ringOut) : 0;
+      ru.uMorph.value = (p.showRing ? ringIn * (1 - ringOut) : 0) * yieldFade;
       const rc = ru.uCenter.value as Float32Array;
       rc[0] = mouse[0] * parallax * 0.05;
       rc[1] = -0.06 + mouse[1] * parallax * 0.03;

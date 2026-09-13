@@ -150,6 +150,50 @@ under 760px, so those drop out, and the labels go under 620px.
 
 `ScanOverlay` itself also takes `color`, `accentColor` and `labels`.
 
+## The mountain
+
+`ParticleMountain` is a second, self-contained scene: a generative range built
+from ~80,000 points, contour slices and a haze bank, with its own camera,
+interactions and HUD. It owns section 02; the shared field stands down across
+that stretch (`yieldRange`) and returns for the dunes, with both ends of the
+cross-fade sitting inside a handover where the splash already whites out the
+composition.
+
+**Built on `ogl`, not three.js.** The brief for it named three's APIs, but this
+project has no three and no R3F, and adding them would mean a second 3D
+framework, a second set of conventions and a second bundle alongside a renderer
+that already does all of it — GPU-side geometry, custom shaders, explicit
+disposal.
+
+Three layers share one context and, critically, one `terrainHeight` function:
+terrain points, contour lines, haze. They are layers rather than three
+components because the lines have to sit exactly on the surface the points
+describe; split across components they would need either three GL contexts or a
+great deal of plumbing to stay in sync.
+
+The height field is `fbm + ridged + medium + fine`, multiplied by a band that
+places the mass in the middle distance and a peak mask that raises one summit
+above the rest. It is evaluated in the vertex shader, never on the CPU — which
+is what makes the idle deformation free: nothing is re-uploaded, the range
+simply breathes because its noise is sampled against time.
+
+Contours are slices at constant *depth*, not true iso-height curves. Marching an
+isoline every frame over a terrain that moves would cost a rebuild per frame; a
+depth slice is a static buffer whose height the shader supplies, and on a slope
+the two are indistinguishable — rows crowd in screen space exactly where a
+contour map tightens its bands.
+
+Every tunable is in the exported `MOUNTAIN` object at the top of the file:
+geometry, the four noise amplitudes, band and peak placement, particle size and
+density, contour count and opacity, haze, camera, scroll push, pointer radius
+and force. Pass `config` to override any of them.
+
+Mobile drops to a coarser grid, fewer contours and no pointer displacement, and
+lines the camera up on the summit rather than the range's centre — a narrow
+frame has no room for an off-axis peak. DPR is capped, and the render loop is
+gated by `IntersectionObserver` and page visibility, so the section costs
+nothing off-screen.
+
 ## Carrying the field between sections
 
 `VortexScene` puts one canvas, fixed to the viewport, behind every section it

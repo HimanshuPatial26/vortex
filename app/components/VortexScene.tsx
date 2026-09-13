@@ -44,6 +44,10 @@ export interface VortexSceneProps {
   /** How far the camera dives through the field on a handover, as a fraction of
    *  its distance to the look-target. 0 disables the travel. */
   travelDepth?: number;
+  /** Morph range over which the shared field stands down because a section owns
+   *  its own visual. Both ends sit inside a handover, so the cross-fade happens
+   *  under the splash. */
+  yieldRange?: [number, number] | null;
   style?: CSSProperties;
 }
 
@@ -59,6 +63,7 @@ export default function VortexScene({
   onSplash,
   background = "#06070C",
   travelDepth = 0.72,
+  yieldRange = null,
   style,
 }: VortexSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -118,6 +123,7 @@ export default function VortexScene({
             morphSource={morphSource}
             splashAt={splashAt}
             travelDepth={travelDepth}
+            yieldRange={yieldRange}
             pointerScope="window"
           />
         </div>

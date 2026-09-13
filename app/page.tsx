@@ -8,9 +8,14 @@
 
 "use client";
 
+import dynamic from "next/dynamic";
 import VortexScene from "./components/VortexScene";
 import HeroVortex from "./components/HeroVortex";
+import MountainHUD from "./components/MountainHUD";
 import { color, font } from "./theme";
+
+// Its own WebGL context, so it only mounts on the client.
+const ParticleMountain = dynamic(() => import("./components/ParticleMountain"), { ssr: false });
 
 const mono = {
   fontFamily: font.mono,
@@ -19,11 +24,6 @@ const mono = {
   textTransform: "uppercase" as const,
 };
 
-const READOUT = [
-  { key: "FORM", value: "RIDGED TERRAIN" },
-  { key: "GRID", value: "POLAR / 220 RINGS" },
-  { key: "SOURCE", value: "CARRIED FROM 01" },
-];
 
 const DUNE_READOUT = [
   { key: "FORM", value: "TRAVELLING SWELL" },
@@ -34,7 +34,10 @@ const DUNE_READOUT = [
 export default function Page() {
   return (
     // The scene owns the morph axis and the advance: each id is a stop on it.
-    <VortexScene sections={["next", "third"]}>
+    // The mountain owns section 02, so the shared field stands down across it
+    // and comes back for the dunes. Both ends of the range sit inside a
+    // handover, where the splash already whites out the composition.
+    <VortexScene sections={["next", "third"]} yieldRange={[0.62, 1.38]}>
       <HeroVortex renderCanvas={false} />
 
       {/* Where the hero's click lands, and where the scattered particles
@@ -45,72 +48,72 @@ export default function Page() {
         style={{
           position: "relative",
           minHeight: "100svh",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          padding: "clamp(40px, 7vh, 76px) clamp(20px, 5vw, 48px)",
+          overflow: "hidden",
         }}
       >
-        {/* Type sits top and bottom; the middle band is left to the terrain. */}
-        <div style={{ maxWidth: 520 }}>
-          <div style={{ ...mono, color: color.textFaint, marginBottom: 16 }}>
-            02 / THE FIELD REASSEMBLED
+        <ParticleMountain />
+        <MountainHUD />
+
+        {/* The foreground terrain runs straight through the copy, and a text
+            shadow alone cannot hold a headline against a field of bright
+            points. A soft scrim in that corner only. */}
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
+            pointerEvents: "none",
+            background:
+              "radial-gradient(78% 46% at 4% 100%, rgba(5,7,10,0.92), rgba(5,7,10,0.5) 42%, transparent 72%)",
+          }}
+        />
+
+        {/* Section copy sits under the range, clear of the summit. */}
+        <div
+          style={{
+            position: "absolute",
+            left: "clamp(20px, 5vw, 48px)",
+            bottom: "clamp(40px, 7vh, 76px)",
+            maxWidth: 430,
+            zIndex: 3,
+          }}
+        >
+          <div style={{ ...mono, color: color.textFaint, marginBottom: 14 }}>
+            02 / GENERATIVE TERRAIN
           </div>
           <h2
             style={{
               fontFamily: font.display,
               fontWeight: 300,
-              fontSize: "clamp(26px, 4vw, 40px)",
+              fontSize: "clamp(24px, 3.4vw, 36px)",
               lineHeight: 1.14,
               letterSpacing: "-0.02em",
               margin: 0,
               textShadow: "0 2px 40px rgba(0,0,0,0.9)",
             }}
           >
-            The same particles,
+            A range that has never
             <br />
             <em style={{ fontStyle: "italic", color: color.textDim }}>
-              a different shape.
+              existed anywhere.
             </em>
           </h2>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
-            gap: 32,
-            flexWrap: "wrap",
-          }}
-        >
           <p
             style={{
-              margin: 0,
-              maxWidth: 380,
+              margin: "16px 0 0",
               fontFamily: font.body,
-              fontSize: 13.5,
+              fontSize: 13,
               lineHeight: 1.7,
               color: color.textMuted,
               textShadow: "0 2px 30px rgba(0,0,0,0.95)",
             }}
           >
-            Nothing is created or destroyed here — the field that made the
-            column is the field that makes the range. The lattice re-reads its
-            own two axes: samples along a strand wrap the circle as contour
-            bands, strand index steps outward as rings, and ridged noise lifts
-            the crests. The vitrine fades, because a cage has no business
-            around a landscape.
+            Sixty thousand points sampled off a height field of layered noise —
+            large masses, ridged crests, then detail — with contour slices
+            following the same surface. Nothing is modelled; the shape is the
+            arithmetic.
           </p>
-
-          <div style={{ display: "grid", gap: 4 }}>
-            {READOUT.map((r) => (
-              <div key={r.key} style={{ ...mono, display: "flex", gap: 10 }}>
-                <span style={{ color: color.textMono2, minWidth: 58 }}>{r.key}</span>
-                <span style={{ color: color.textFaint }}>{r.value}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 
