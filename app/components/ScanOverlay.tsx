@@ -259,8 +259,15 @@ export default function ScanOverlay({
 
       // The sculpture is on a fixed canvas, so the overlay has to let go of it
       // deliberately rather than scrolling away with the section.
-      const fade = Math.max(0, Math.min(1, 1 - window.scrollY / (h * 0.55)));
+      const leaving = Math.max(0, Math.min(1, window.scrollY / (h * 0.55)));
+      const fade = 1 - leaving;
       svg.style.opacity = String(fade * opacity);
+      /* The canvas behind dives through the field on the handover; the marks are
+         DOM and cannot follow it, so they expand past the frame instead. Without
+         this they sit perfectly still while everything behind them rushes, and
+         the travel reads as a video playing under a sticker. */
+      svg.style.transform = `scale(${(1 + leaving * 0.55).toFixed(3)})`;
+      svg.style.transformOrigin = "50% 42%";
       if (fade <= 0.001) {
         raf = requestAnimationFrame(frame);
         return;

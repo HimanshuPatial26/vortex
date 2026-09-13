@@ -41,6 +41,9 @@ export interface VortexSceneProps {
   /** Page ground. The sections above are transparent, so this is what the
    *  field is drawn against. */
   background?: string;
+  /** How far the camera dives through the field on a handover, as a fraction of
+   *  its distance to the look-target. 0 disables the travel. */
+  travelDepth?: number;
   style?: CSSProperties;
 }
 
@@ -55,6 +58,7 @@ export default function VortexScene({
   advanceDuration = 1100,
   onSplash,
   background = "#06070C",
+  travelDepth = 0.72,
   style,
 }: VortexSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -113,6 +117,7 @@ export default function VortexScene({
             onSplash={handleSplash}
             morphSource={morphSource}
             splashAt={splashAt}
+            travelDepth={travelDepth}
             pointerScope="window"
           />
         </div>

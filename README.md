@@ -244,6 +244,32 @@ All copy is prop-driven: `eyebrow`, `headline`, `subline`, `actions`, `note`,
 nodes, the rest take strings. Plus `density` (passed through), `height`
 (default `100svh`) and `style`.
 
+### Travelling between sections
+
+The handover is a camera move, not a cut. While the splash runs, the camera
+travels along its own view axis toward the point it is already aimed at, so the
+field opens and rushes past — you go *into* the sculpture and come out in the
+next section's form. It is out and back on a half-sine: deepest at the midpoint,
+which is where the scroll is fastest and the form is halfway between its two
+shapes, and back at its station by the time the splash settles.
+
+Moving toward the look-target and re-aiming at the same point is a true dolly —
+the orientation never changes, only the distance. That is what separates
+travelling *into* something from zooming *at* it.
+
+The lens also widens by a few degrees at the deepest point. The dolly alone
+reads as a slow push; the widening is what the eye takes as acceleration.
+
+`travelDepth` (default `0.72`, on both `VortexScene` and `ParticleVortex`) is
+the fraction of the distance covered; `0` disables the travel and leaves the
+splash alone. Past about `0.9` the camera overshoots the target and the dive
+inverts. `travelFov` on `ParticleVortex` sets the punch in degrees.
+
+The scan overlay is DOM and cannot follow a 3D camera, so it scales outward
+through the handover instead. Without that it sits perfectly still while
+everything behind it rushes, and the travel reads as a video playing under a
+sticker.
+
 ### Click to advance
 
 Give `HeroVortex` the id of the section below it and clicking the field bursts

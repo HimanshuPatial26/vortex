@@ -679,6 +679,15 @@ export interface ParticleVortexProps {
   splashStrength?: number;
   /** Seconds the splash takes to travel out and settle back. */
   splashDuration?: number;
+  /** Dive the camera through the field while the splash runs, so the handover
+   *  reads as travelling into the next section rather than cutting to it. */
+  travelOnSplash?: boolean;
+  /** How far in, as a fraction of the distance to the camera's look-target.
+   *  Above ~0.9 the camera passes through the target and the dive inverts. */
+  travelDepth?: number;
+  /** Degrees of field-of-view punch at the deepest point. The widening is what
+   *  the eye reads as acceleration; the dolly alone feels like a zoom. */
+  travelFov?: number;
   /** Fired the moment a splash starts — use it to advance the page. */
   onSplash?: () => void;
   /** Morph values that fire a splash when the scroll crosses them going down.
@@ -720,6 +729,9 @@ export default function ParticleVortex({
   splashOnClick = false,
   splashStrength = 1.15,
   splashDuration = 1.15,
+  travelOnSplash = true,
+  travelDepth = 0.72,
+  travelFov = 9,
   onSplash,
   morph = 0,
   morphSource,
@@ -738,12 +750,14 @@ export default function ParticleVortex({
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
     morph, morphSource, showRing, spectrumStrength, splashAt,
+    travelOnSplash, travelDepth, travelFov,
   });
   propsRef.current = {
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
     morph, morphSource, showRing, spectrumStrength, splashAt,
+    travelOnSplash, travelDepth, travelFov,
   };
 
   const applyProps = () => {
@@ -932,6 +946,11 @@ export default function ParticleVortex({
     // Declared ahead of setSize, which runs during setup and assigns terrainR.
     let terrainR = 5;
     let duneScale = 1;
+    // The dive re-derives the projection each frame, so it needs the aspect the
+    // resize last computed.
+    let aspectNow = 1;
+    const baseFov = 42;
+    let lastFov = baseFov;
     const camZ = camera.position.z;
     const camY = camera.position.y;
     const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
@@ -942,7 +961,9 @@ export default function ParticleVortex({
       const h = Math.max(1, Math.floor(rect.height));
       renderer.setSize(w, h);
       const aspect = w / h;
-      camera.perspective({ aspect });
+      aspectNow = aspect;
+      lastFov = baseFov;
+      camera.perspective({ fov: baseFov, aspect });
       camera.lookAt([0, 0, 0]);
 
       // Fit by scaling the scene rather than dollying the camera: the
@@ -1097,9 +1118,44 @@ export default function ParticleVortex({
       const tz = lerp(camZ, terrainR * 0.78, k1);
       const tax = lerp(0, terrainR * 0.05, k1);
       const taz = lerp(0, -terrainR * 0.3, k1);
-      camera.position.y = lerp(ty, duneScale * 3.4, k2);
-      camera.position.z = lerp(tz, duneScale * 8.0, k2);
-      camera.lookAt([0, lerp(tax, -duneScale * 1.6, k2), lerp(taz, -duneScale * 9, k2)]);
+      const camPy = lerp(ty, duneScale * 3.4, k2);
+      const camPz = lerp(tz, duneScale * 8.0, k2);
+      const aimY = lerp(tax, -duneScale * 1.6, k2);
+      const aimZ = lerp(taz, -duneScale * 9, k2);
+      camera.position.y = camPy;
+      camera.position.z = camPz;
+      camera.lookAt([0, aimY, aimZ]);
+
+      /* The dive. While the splash runs, the camera travels along its own view
+         axis toward the point it is already aimed at, so the field opens and
+         rushes past instead of the page simply cutting to the next section.
+         Out and back on a half-sine: deepest at the midpoint, which is where
+         the scroll is fastest and the form is halfway between its two shapes.
+
+         Moving toward the look-target and re-aiming at the same point is a true
+         dolly — the orientation never changes, only the distance, which is what
+         separates travelling into something from zooming at it. */
+      const travel = p.travelOnSplash && splash > 0.001 ? Math.sin((1 - splash) * Math.PI) : 0;
+      if (travel > 0.001) {
+        const dx = 0 - camera.position.x;
+        const dy = aimY - camPy;
+        const dz = aimZ - camPz;
+        const len = Math.hypot(dx, dy, dz) || 1;
+        const reach = travel * p.travelDepth;
+        camera.position.set(
+          camera.position.x + (dx / len) * len * reach,
+          camPy + (dy / len) * len * reach,
+          camPz + (dz / len) * len * reach,
+        );
+        camera.lookAt([0, aimY, aimZ]);
+      }
+      // Widening the lens as it accelerates is the cue that sells speed; the
+      // dolly on its own reads as a slow push.
+      const wantFov = baseFov + travel * p.travelFov;
+      if (Math.abs(wantFov - lastFov) > 0.01) {
+        camera.perspective({ fov: wantFov, aspect: aspectNow });
+        lastFov = wantFov;
+      }
 
       const pu = pointProgram.uniforms as any;
       pu.uTime.value = clock;
