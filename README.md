@@ -152,12 +152,13 @@ under 760px, so those drop out, and the labels go under 620px.
 
 ## The mountain
 
-`ParticleMountain` is a second, self-contained scene: a generative range built
-from ~80,000 points, contour slices and a haze bank, with its own camera,
-interactions and HUD. It owns section 02; the shared field stands down across
-that stretch (`yieldRange`) and returns for the dunes, with both ends of the
-cross-fade sitting inside a handover where the splash already whites out the
-composition.
+`ParticleMountain` is a second, self-contained scene: a generative range drawn
+in ~240,000 points and ~900 draped lines, with its own camera, interactions, HUD
+and — the part that makes it read as a landscape rather than a lattice — an
+invisible surface underneath it that writes depth. It owns section 02; the shared
+field stands down across that stretch (`yieldRange`) and returns for the dunes,
+with both ends of the cross-fade sitting inside a handover where the splash
+already whites out the composition.
 
 **Built on `ogl`, not three.js.** The brief for it named three's APIs, but this
 project has no three and no R3F, and adding them would mean a second 3D
@@ -165,52 +166,98 @@ framework, a second set of conventions and a second bundle alongside a renderer
 that already does all of it — GPU-side geometry, custom shaders, explicit
 disposal.
 
-Three layers share one context and one height field: terrain points, contour
-lines, haze. They are layers rather than three components because the lines have
-to sit exactly on the surface the points describe; split across components they
-would need either three GL contexts or a great deal of plumbing to stay in sync.
+### The shape is designed, not discovered
 
-The height field is `fbm + ridged + medium + fine`, multiplied by a band that
-places the mass in the middle distance and by peak masks that carry the two
-summits. Masks alone only amplify whatever noise happens to sit under them, so
-each summit also adds a lift dome — otherwise a shoulder can out-top the peak
-you asked for. Flanks fall off asymmetrically (the left slope reaches further
-than the right) so the range never reads as a mirrored pair. It is all evaluated
-in the vertex shader, never on the CPU — which is what makes the idle
-deformation free: nothing is re-uploaded, the range simply breathes because its
-noise is sampled against time.
+A noise plane under a mask can only ever produce whatever silhouette the noise
+happens to have that day. The large forms here are an explicit table —
+`MOUNTAIN.masses` (oriented ellipses with heights) and `MOUNTAIN.ridges` (spines
+that taper from one point to another) — unrolled into GLSL at build time and
+evaluated analytically in the vertex shader. One tall narrow summit, teeth around
+it, a shoulder left, a secondary peak right, branching spines descending toward
+the camera with the valleys between them left empty.
 
-Points read the full four-octave field; **lines and surface normals read a
-two-octave `terrainSmooth` instead**. That split is what keeps the section from
-looking triangulated: constant-depth slices over a ridged surface zigzag hard
-enough to cross each other into a mesh, and a mesh is the one thing this should
-never look like. On the smooth surface the same slices flow — `~~~~` rather than
-`/\/\/\` — while the points keep every bit of the detail. Smooth normals also
-produce much gentler slopes, so the slope-driven density had to be recalibrated
-against them; the particles, not the lines, carry the mass.
+Forms combine by `max`, never by sum. Summing means every spine meeting at the
+summit contributes its full height there, and the peak leaves frame as an
+80-unit spire; taking the greater of the two merges them the way ground does, and
+each number in the table is then literally how tall that form is.
 
-A screen-space `copyGuard` dims the field where the editorial block sits. A
-scrim over the canvas would flatten that whole corner; dimming the particles
-themselves keeps the terrain present behind the type without competing with
-it.
+Detail comes from domain-warped ridged noise that **carves rather than piles**.
+Adding ridged noise puts a spire on every crest it finds — a bed of nails.
+Subtracting `(1 - ridged)` cuts gullies down into the designed mass instead,
+which is what erosion does: long branching channels between ridges. The carve
+scales in proportion to how much mass is underneath, so the summit erodes hard
+and the open ground barely at all.
 
-Contours are slices at constant *depth*, not true iso-height curves. Marching an
-isoline every frame over a terrain that moves would cost a rebuild per frame; a
-depth slice is a static buffer whose height the shader supplies, and on a slope
-the two are indistinguishable — rows crowd in screen space exactly where a
-contour map tightens its bands.
+### Three surfaces, because lines and points want opposite things
 
-Every tunable is in the exported `MOUNTAIN` object at the top of the file:
-geometry, the four noise amplitudes, band placement, both peaks and their lifts,
-edge falloff, particle size and valley thinning, contour count and opacity,
-haze, camera, scroll push, pointer radius and force. Pass `config` to override
-any of them.
+- `terrainFlow` — skeleton plus three carved octaves. What the **lines** follow.
+- `terrainBase` — the above with a fine gully octave cut in. What the **points**
+  sit on, and what the **depth occluder** copies.
+- `terrainDetail` — one octave finer again, points only.
 
-Mobile drops to a coarser grid, fewer contours and no pointer displacement, and
-lines the camera up on the summit rather than the range's centre — a narrow
-frame has no room for an off-axis peak. DPR is capped, and the render loop is
-gated by `IntersectionObserver` and page visibility, so the section costs
-nothing off-screen.
+A slice taken across close-set gullies zigzags, and a family of zigzagging slices
+reads as a triangulated mesh — the one thing this must never look like. So the
+lines get the smooth surface and the points get the detail. The fine octave is
+carve-only, which guarantees `terrainBase ≤ terrainFlow`: a line can never sink
+beneath the ground it is drawn on.
+
+### Depth, so the range cannot show through itself
+
+A triangulated copy of the surface is drawn first with the colour mask closed. It
+contributes no colour; it exists so points and lines on the far side of a ridge
+fail the depth test. It sits `occluderDrop` below the drawn surface, which has to
+clear the finest octave or a point in a crevice would be hidden by its own
+ground. It takes the same pointer displacement the visible layers do — a surface
+that did not move with them would occlude the wrong things the moment the cursor
+arrived.
+
+Everything else is additive, and with the back faces gone that stays a bright
+accumulation on crests rather than a white cloud.
+
+### The draped lines
+
+Families of independent strips running across the landscape, separated in depth
+and wandering in it so they never read as ruled rows. Projected, they become the
+long nested arcs and hanging curtains of the reference: a constant-depth cut over
+a ridge rises and falls exactly where the ridge does. Adjacent paths are never
+joined — no cross-connections, no triangle edges, no grid. Each thins and returns
+on its own slow interval, and dotted samples taken along the same curves (a coin
+flip per sample, not a fixed stride) give the beading.
+
+### Motion that leaves the composition alone
+
+The octaves that carry the shape are sampled at a **fixed** time. Drifting them
+moved the summit by a fifteenth of the frame inside a minute; the skyline is the
+composition and it has to stay where it was tuned. The idle animation lives in
+the octaves that only texture the surface, in the finest octave the points read —
+which cannot reach the silhouette — and in the shimmer, the path breathing, the
+drift grains and the parallax. Measured over 45 seconds of animation, the median
+skyline column moves 1px in 563 and the 90th percentile moves 6.
+
+Pointer displacement is tangential rather than radial: pushing straight outward
+opens a circular hole, sliding the surface sideways deforms it without punching
+through it.
+
+### Everything else
+
+`MOUNTAIN` holds every tunable: field extent, lattice size and packing, the mass
+and ridge tables, noise amplitudes, occluder resolution and drop, particle size
+and thinning, path count and opacity, drift, haze, camera and motion. Pass
+`config` to override any of them. `debugSurface` draws the depth occluder as a
+shaded solid, which is how the silhouette was tuned before a single particle was
+drawn.
+
+Sample placement packs the lattice toward the centre and toward the camera, where
+the frame actually spends its pixels. The curve is `u(k + (1-k)u²)` rather than a
+power — a power's derivative goes to zero at the origin, which stacks a whole
+column of the lattice onto x = 0 and leaves a bright seam up the middle of the
+frame.
+
+Mobile drops to a coarser everything, no pointer displacement, and lines the
+camera up on the summit rather than the range's centre — a narrow frame has no
+room for an off-axis peak. DPR is capped, and the render loop is gated by
+`IntersectionObserver` and page visibility, so the section costs nothing
+off-screen.
 
 ## Carrying the field between sections
 

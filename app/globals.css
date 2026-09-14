@@ -51,21 +51,23 @@ body { margin: 0; background: #06070C; }
 /* ── ParticleMountain HUD ── */
 /* The annotation is a margin around the range. On a phone there is no margin,
    so all but the title and the summit callout stand down. */
+/* !important throughout: these blocks are competing with inline styles on the
+   HUD elements, which a plain stylesheet rule cannot outrank. */
 @media (max-width: 820px) {
   .pm-hud-lat,
   .pm-hud-lon,
-  .pm-hud-scale { display: none; }
+  .pm-hud-scale { display: none !important; }
 }
 @media (max-width: 560px) {
   .pm-hud-right,
   .pm-hud-alt,
-  .pm-hud-grid { display: none; }
+  .pm-hud-grid { display: none !important; }
   /* Anchored to the right edge, leader dropped: at this width the callout ran
      off the frame. */
   .pm-hud-peak {
-    left: auto;
+    left: auto !important;
     right: clamp(18px, 5vw, 40px);
     top: 24%;
   }
-  .pm-hud-peak svg { display: none; }
+  .pm-hud-peak svg { display: none !important; }
 }

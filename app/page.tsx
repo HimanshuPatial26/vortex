@@ -88,6 +88,9 @@ export default function Page() {
           <h2
             style={{
               fontFamily: font.display,
+              // Explicit: nothing upstream sets a text colour, so an unstyled
+              // heading falls back to the UA default and renders black on black.
+              color: color.text,
               fontWeight: 300,
               fontSize: "clamp(24px, 3.4vw, 36px)",
               lineHeight: 1.14,
@@ -112,10 +115,11 @@ export default function Page() {
               textShadow: "0 2px 30px rgba(0,0,0,0.95)",
             }}
           >
-            Sixty thousand points sampled off a height field of layered noise —
-            large masses, ridged crests, then detail — with contour slices
-            following the same surface. Nothing is modelled; the shape is the
-            arithmetic.
+            The range is designed, not discovered: a table of mountain masses
+            and ridge paths that the shader evaluates directly, with erosion
+            carved into it by ridged noise. A quarter of a million points and
+            nine hundred draped lines read the same surface, and an invisible
+            copy of it writes depth so the far side never shows through.
           </p>
         </div>
       </section>
@@ -140,6 +144,9 @@ export default function Page() {
           <h2
             style={{
               fontFamily: font.display,
+              // Explicit: nothing upstream sets a text colour, so an unstyled
+              // heading falls back to the UA default and renders black on black.
+              color: color.text,
               fontWeight: 300,
               fontSize: "clamp(26px, 4vw, 40px)",
               lineHeight: 1.14,
