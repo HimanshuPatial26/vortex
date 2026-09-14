@@ -22,9 +22,11 @@ export const TRANSITION = {
    *  is a stall: the page stops moving while the transformation runs. Two
    *  viewports of that reads as the scroll having jammed between two sections
    *  rather than as one section becoming the next. */
-  scrollVh: 1.0,
+  scrollVh: 0.65,
   /** Viewports the finished landscape is held on screen, still pinned, before
-   *  the stage releases and scrolls away.
+   *  the stage releases and scrolls away. Kept short: a pin is a stall, and a
+   *  full viewport of it after the landscape has already arrived is a lot of
+   *  wheel for a picture that has stopped changing.
    *
    *  Without this the stage unpins the instant the transformation ends, so the
    *  composed landscape exists for one frame and then slides straight up out of
@@ -32,7 +34,7 @@ export const TRANSITION = {
    *  foreground. A sticky element scrolls out over its own height, so the
    *  section has to be this much taller than the stage for the landscape to
    *  hold still at all. */
-  restVh: 1.0,
+  restVh: 0.6,
   /** Viewports of the hero's own tail that the transformation reaches back
    *  into. The handover has to happen while the hero is still on screen: park
    *  it after the hero and the reader gets a second full-screen vortex, framed
@@ -141,17 +143,35 @@ export const LEAD_FRACTION =
  *  Starts `leadVh` viewports before the section reaches the top, so the hero
  *  releases and the field changes hands while the hero is still leaving.
  *  Pure in scrollY: reversing scroll retraces the same path. */
+/* Memoised across the frame. Four separate things read this every frame — the
+   hero's field, the landscape, and the two copy fades — and each read is a
+   getBoundingClientRect, which forces the browser to lay the page out again.
+   Seven forced layouts a frame during a scroll is enough to cost frames on its
+   own, and dropped frames are exactly what makes a pinned stretch feel like
+   hard work. */
+let cachedAt = -1;
+let cachedFor = "";
+let cachedValue = 0;
+
 export const transitionProgress = (
   sectionId: string,
   scrollVh = TRANSITION.scrollVh,
   leadVh = TRANSITION.leadVh,
 ) => {
+  const now = performance.now();
+  if (cachedFor === sectionId && now - cachedAt < 6) return cachedValue;
+
   const el = document.getElementById(sectionId);
   if (!el) return 1;
   const top = el.getBoundingClientRect().top;
   const vh = window.innerHeight;
   const lead = vh * leadVh;
-  return clamp01((lead - top) / Math.max(vh * scrollVh + lead, 1));
+  const v = clamp01((lead - top) / Math.max(vh * scrollVh + lead, 1));
+
+  cachedAt = now;
+  cachedFor = sectionId;
+  cachedValue = v;
+  return v;
 };
 
 /** The gather's own progress, with the handover lead taken back off. */

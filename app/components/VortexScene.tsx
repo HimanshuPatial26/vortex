@@ -12,7 +12,7 @@
    alike. */
 
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAdvanceScroll } from "./useAdvanceScroll";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -83,23 +83,48 @@ export default function VortexScene({
   /* Read once per frame by the render loop rather than pushed in as a prop from
      a scroll listener — a React render per scroll event would cost far more
      than the field itself. */
+  /* Where each stop sits in the document. Measured from the stops themselves
+     rather than assuming one viewport each — a section that owns a scroll-driven
+     transformation is several viewports tall, and a fixed span would run the
+     morph off the end of it long before the reader got there.
+
+     Cached, because these only move when the page is laid out again: reading
+     them per frame means a forced layout per stop on every frame of every
+     scroll, which is pure waste for numbers that did not change. */
+  const stopsRef = useRef<number[] | null>(null);
+  useEffect(() => {
+    const measure = () => {
+      const y = window.scrollY;
+      stopsRef.current = sections.map((id, i) => {
+        const el = document.getElementById(id);
+        return el
+          ? el.getBoundingClientRect().top + y
+          : window.innerHeight * morphSpan * (i + 1);
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    /* Section heights are in svh, so they also change when a mobile browser's
+       toolbars slide away — which fires no resize event on some engines. */
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.documentElement);
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro.disconnect();
+    };
+  }, [sections, morphSpan]);
+
   const morphSource = useCallback(() => {
-    /* Measured from where the stops actually are rather than assuming one
-       viewport each. A section that owns a long scroll-driven transition is
-       several viewports tall, and a fixed span would run the morph off the end
-       of it long before the reader got there. */
+    const stops = stopsRef.current;
+    if (!stops) return 0;
     const y = window.scrollY;
     let prev = 0;
-    for (let i = 0; i < sections.length; i++) {
-      const el = document.getElementById(sections[i]);
-      const top = el
-        ? el.getBoundingClientRect().top + y
-        : window.innerHeight * morphSpan * (i + 1);
-      if (y < top) return i + (y - prev) / Math.max(top - prev, 1);
-      prev = top;
+    for (let i = 0; i < stops.length; i++) {
+      if (y < stops[i]) return i + (y - prev) / Math.max(stops[i] - prev, 1);
+      prev = stops[i];
     }
-    return sections.length;
-  }, [morphSpan, sections]);
+    return stops.length;
+  }, []);
 
   /* One just past every boundary, so a plain scroll scatters the field at each
      handover exactly as a click does. A click's own splash suppresses the one

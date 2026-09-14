@@ -33,34 +33,39 @@ const DUNE_READOUT = [
   { key: "LENS", value: "SHALLOW FOCUS" },
 ];
 
-/* Drives an element's opacity straight from scroll, on the same rAF the field
-   uses. A React state update per scroll event would re-render the page dozens of
-   times a second to change one number. */
-function useTransitionFade(range: [number, number], invert = false) {
-  const ref = useRef<HTMLDivElement>(null);
+/* Drives both fades from one loop, straight off scroll. A React state update
+   per scroll event would re-render the page dozens of times a second to change
+   two numbers, and a loop each would double the layout reads for no reason. */
+function useTransitionFades() {
+  const copy = useRef<HTMLDivElement>(null);
+  const hud = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      const el = ref.current;
-      if (el) {
-        const p = unravelProgress(transitionProgress("next"));
-        const f = smoothstep(range[0], range[1], p);
-        el.style.opacity = String(invert ? 1 - f : f);
+      const p = unravelProgress(transitionProgress("next"));
+      if (copy.current) {
+        copy.current.style.opacity = String(
+          smoothstep(TRANSITION.copyFade[0], TRANSITION.copyFade[1], p),
+        );
+      }
+      if (hud.current) {
+        hud.current.style.opacity = String(
+          smoothstep(TRANSITION.hudFade[0], TRANSITION.hudFade[1], p),
+        );
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [range, invert]);
-  return ref;
+  }, []);
+  return { copy, hud };
 }
 
 export default function Page() {
   /* One source of truth for the whole choreography: the field, the hero's
      release and the copy all read the same number, so they cannot drift. */
   const progress = useCallback(() => transitionProgress("next"), []);
-  const copyRef = useTransitionFade(TRANSITION.copyFade);
-  const hudRef = useTransitionFade(TRANSITION.hudFade);
+  const { copy: copyRef, hud: hudRef } = useTransitionFades();
 
   return (
     /* The morph stops are the resting states, not the section tops: the
