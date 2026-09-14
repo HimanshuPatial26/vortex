@@ -23,6 +23,16 @@ export const TRANSITION = {
    *  viewports of that reads as the scroll having jammed between two sections
    *  rather than as one section becoming the next. */
   scrollVh: 1.0,
+  /** Viewports the finished landscape is held on screen, still pinned, before
+   *  the stage releases and scrolls away.
+   *
+   *  Without this the stage unpins the instant the transformation ends, so the
+   *  composed landscape exists for one frame and then slides straight up out of
+   *  the viewport — leaving the section's copy sitting under a half-visible
+   *  foreground. A sticky element scrolls out over its own height, so the
+   *  section has to be this much taller than the stage for the landscape to
+   *  hold still at all. */
+  restVh: 1.0,
   /** Viewports of the hero's own tail that the transformation reaches back
    *  into. The handover has to happen while the hero is still on screen: park
    *  it after the hero and the reader gets a second full-screen vortex, framed

@@ -85,19 +85,19 @@ export default function Page() {
       <HeroVortex renderCanvas={false} />
 
       {/* The transformation and the resting landscape share one section. Its
-          first TRANSITION.scrollVh viewports drive the unravel with the stage
-          pinned; the last one is the mountain at rest, scrolling normally. */}
+          first TRANSITION.scrollVh viewports gather the field with the stage
+          pinned, the next TRANSITION.restVh hold the finished landscape still,
+          and the last one is the stage scrolling away into the dunes. */}
       <section
         id="next"
         style={{
           position: "relative",
-          height: `${(TRANSITION.scrollVh + 1) * 100}svh`,
+          height: `${(TRANSITION.scrollVh + TRANSITION.restVh + 1) * 100}svh`,
         }}
       >
-        {/* Pinned for exactly as long as the transformation lasts, then it
-            releases and scrolls away with the section — so the landscape gets a
-            full viewport of ordinary scrolling and there is no jump at the
-            handover. */}
+        {/* Pinned for the transformation and then for the rest, so the finished
+            landscape holds still under its own copy before the stage releases
+            and scrolls away into the next section. */}
         <div style={{ position: "sticky", top: 0, height: "100svh", overflow: "hidden" }}>
         <ParticleMountain progressSource={progress} />
         <div ref={hudRef} style={{ position: "absolute", inset: 0, opacity: 0 }}>

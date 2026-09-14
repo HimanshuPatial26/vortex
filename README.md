@@ -263,7 +263,12 @@ off-screen.
 
 The hero's field bursts, the burst fills the frame, and the landscape gathers
 out of it. Between the two resting states sits `TRANSITION.scrollVh` viewports
-of scroll with the stage pinned — about one screen. A pin is a stall: the page
+of scroll with the stage pinned — about one screen — and then
+`TRANSITION.restVh` more with it still pinned, holding the finished landscape
+under its own copy. A sticky element scrolls out over its own height, so without
+that second stretch the stage unpins the instant the transformation ends: the
+composed landscape exists for one frame and then slides straight up out of the
+viewport, leaving the copy sitting under a half-visible foreground. A pin is a stall: the page
 stops moving while the transformation runs, and two viewports of that reads as
 the scroll having jammed between two sections rather than as one section
 becoming the next. Every knob for the choreography lives in one object in
