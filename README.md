@@ -259,6 +259,73 @@ room for an off-axis peak. DPR is capped, and the render loop is gated by
 `IntersectionObserver` and page visibility, so the section costs nothing
 off-screen.
 
+## The transition
+
+The vortex does not cross-fade into the mountain; it unravels into it. Between
+the two resting states sits `TRANSITION.scrollVh` viewports of scroll with the
+stage pinned, and every knob for the choreography lives in one object in
+`components/transition.ts` — scroll length, phase timings, spread, unravelling
+strength, path curvature, camera path, line reveal and text fades — because the
+sequence is split across three places that all have to agree.
+
+### The mapping
+
+Every mountain particle already has a place on the terrain. The transition gives
+it a second one on the column, and the correspondence is spatial rather than
+arbitrary:
+
+- A particle's **angle** on the column is its bearing from the summit on the
+  finished terrain, plus the accumulated twist. Unravelling is literally that
+  twist unwinding back to zero.
+- Its **height** on the column comes from its distance from the summit. The
+  peak's own particles sit at the mouth; the far ground sits at the base.
+
+So neighbours travel together as readable strands, the upper column feeds the
+summit and upper ridges, and the base sweeps out into the foreground. The whole
+thing is expressed in cylindrical coordinates around the summit's axis, which is
+what makes it read as a vortex untwisting rather than a cloud being pulled
+apart — and it means the paths are curved by construction, with no control
+points to invent.
+
+Three easings run at different rates: the twist lets go first, the radius spreads
+through the middle, the height settles last. That is the difference between a
+strand sweeping out and a point sliding along a line.
+
+### Timing
+
+Each particle leaves on its own schedule — base first, summit last — so a
+recognisable peak stands while everything under it spreads. Every term is a pure
+function of the particle's cell and the scroll position, with nothing
+integrated, so holding still holds the shape and scrolling back retraces the
+same paths.
+
+### What had to be coordinated
+
+- **The lines** are keyed to each vertex's own settle, not to global progress, so
+  a line only draws over ground that has arrived. The finished wire structure is
+  never visible under an unfinished vortex.
+- **The depth occluder** stays off until the ground under it exists, then rises
+  into place. A finished terrain writing depth beneath a field still in flight
+  would cull the travelling particles outright.
+- **Shading** crosses over with the shape. Slope and ridge terms describe ground;
+  a particle still on the column is lit by where it sits on the column, or the
+  vortex arrives pre-painted with a landscape.
+- **Density.** A quarter of a million points squeezed into a few units of radius
+  is a solid white bar under additive blending. Every layer scales its alpha by
+  how concentrated it currently is relative to where it will end up.
+- **Cursor displacement** stands down while the field is in flight.
+
+The camera runs one continuous path — a short press toward the column, then a
+long pull back as the landscape opens out — interpolated through `lookAt`, so
+the horizon never rolls and there is nothing to snap at the end. Fog and point
+size are calibrated against the resting station's distance to its aim, so the
+travelling camera reports that same quantity rather than a raw z that changes
+sign along the way.
+
+Reduced motion gets the same transformation, done inside the first
+`TRANSITION.reducedSpan` of the scroll and with the camera left at its resting
+station.
+
 ## Carrying the field between sections
 
 `VortexScene` puts one canvas, fixed to the viewport, behind every section it

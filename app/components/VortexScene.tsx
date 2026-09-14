@@ -32,8 +32,13 @@ export interface VortexSceneProps {
    *  morph axis: the field takes its next form as that section fills the
    *  screen, and a click advances to whichever comes next. */
   sections?: string[];
-  /** Fraction of a viewport of scrolling per morph stage. */
+  /** Fraction of a viewport of scrolling per morph stage. Used only when a
+   *  section id cannot be measured. */
   morphSpan?: number;
+  /** Where a click advances to, if that is not the morph stops themselves. */
+  advanceTo?: string[];
+  /** Progress through the hero's release, read once per frame. */
+  releaseSource?: () => number;
   /** Milliseconds a click-advance scroll takes. */
   advanceDuration?: number;
   /** Runs alongside the advance when the field is clicked. */
@@ -59,6 +64,8 @@ export default function VortexScene({
   lineColor = "#C8CEDE",
   sections = [],
   morphSpan = 1,
+  advanceTo,
+  releaseSource,
   advanceDuration = 1100,
   onSplash,
   background = "#06070C",
@@ -73,9 +80,22 @@ export default function VortexScene({
      a scroll listener — a React render per scroll event would cost far more
      than the field itself. */
   const morphSource = useCallback(() => {
-    const span = Math.max(window.innerHeight * morphSpan, 1);
-    return Math.max(0, Math.min(sections.length, window.scrollY / span));
-  }, [morphSpan, sections.length]);
+    /* Measured from where the stops actually are rather than assuming one
+       viewport each. A section that owns a long scroll-driven transition is
+       several viewports tall, and a fixed span would run the morph off the end
+       of it long before the reader got there. */
+    const y = window.scrollY;
+    let prev = 0;
+    for (let i = 0; i < sections.length; i++) {
+      const el = document.getElementById(sections[i]);
+      const top = el
+        ? el.getBoundingClientRect().top + y
+        : window.innerHeight * morphSpan * (i + 1);
+      if (y < top) return i + (y - prev) / Math.max(top - prev, 1);
+      prev = top;
+    }
+    return sections.length;
+  }, [morphSpan, sections]);
 
   /* One just past every boundary, so a plain scroll scatters the field at each
      handover exactly as a click does. A click's own splash suppresses the one
@@ -88,11 +108,12 @@ export default function VortexScene({
   // A click advances to whichever section comes next from where the page is.
   const handleSplash = useCallback(() => {
     onSplash?.();
-    if (!sections.length) return;
+    const stops = advanceTo ?? sections;
+    if (!stops.length) return;
     const here = Math.round(window.scrollY / Math.max(window.innerHeight, 1));
-    const id = sections[Math.min(here, sections.length - 1)];
+    const id = stops[Math.min(here, stops.length - 1)];
     if (id) scrollTo(id);
-  }, [onSplash, sections, scrollTo]);
+  }, [onSplash, sections, advanceTo, scrollTo]);
 
   return (
     <div ref={hostRef} style={{ position: "relative", background, ...style }}>
@@ -121,6 +142,7 @@ export default function VortexScene({
             splashOnClick
             onSplash={handleSplash}
             morphSource={morphSource}
+            releaseSource={releaseSource}
             splashAt={splashAt}
             travelDepth={travelDepth}
             yieldRange={yieldRange}

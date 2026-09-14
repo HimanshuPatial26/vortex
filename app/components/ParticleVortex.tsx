@@ -652,6 +652,10 @@ export interface ParticleVortexProps {
   /** Read once per frame for the morph, for scroll-driven blends. Overrides
    *  `morph` when given — it avoids a React render per scroll event. */
   morphSource?: () => number;
+  /** Progress through the hero's release, 0 to 1, read once per frame. The
+   *  vitrine separates in depth, expands and fades; the spin slows; the field
+   *  hands over. Omit and the hero behaves exactly as before. */
+  releaseSource?: () => number;
   /** Draw the eclipse ring at the centre of the terrain. */
   showRing?: boolean;
   /** Morph range over which this field hands the frame to something else and
@@ -692,6 +696,7 @@ export default function ParticleVortex({
   onSplash,
   morph = 0,
   morphSource,
+  releaseSource,
   splashAt,
   showRing = true,
   yieldRange = null,
@@ -707,14 +712,14 @@ export default function ParticleVortex({
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
-    morph, morphSource, showRing, spectrumStrength, splashAt,
+    morph, morphSource, releaseSource, showRing, spectrumStrength, splashAt,
     travelOnSplash, travelDepth, travelFov, yieldRange,
   });
   propsRef.current = {
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
-    morph, morphSource, showRing, spectrumStrength, splashAt,
+    morph, morphSource, releaseSource, showRing, spectrumStrength, splashAt,
     travelOnSplash, travelDepth, travelFov, yieldRange,
   };
 
@@ -1038,6 +1043,16 @@ export default function ParticleVortex({
           ? 0
           : Math.max(0, 1 - (t - splashStart) / (Math.max(p.splashDuration, 0.05) * 1000));
 
+      /* The hero's release. The vitrine is a fixed cage around a sculpture that
+         is about to leave, so it opens outward and in depth and fades as the
+         field goes with it; the spin eases off so the column is visibly
+         slowing rather than cut mid-turn. */
+      const release = p.releaseSource ? Math.max(0, Math.min(1, p.releaseSource())) : 0;
+      const releaseFade = 1 - Math.min(1, Math.max(0, (release - 0.03) / 0.27));
+      lines.scale.set(1 + release * 0.34, 1 + release * 0.1, 1 + release * 0.62);
+      (pointProgram.uniforms.uSpin.value as number) = p.spinSpeed * (1 - release * 0.82);
+      (pointProgram.uniforms.uFlow.value as number) = p.flowSpeed * (1 - release * 0.6);
+
       const target = p.morphSource ? p.morphSource() : p.morph;
 
       /* Fire a splash when the scroll crosses a boundary on the way down, so
@@ -1137,11 +1152,12 @@ export default function ParticleVortex({
       lu.uPointerIn.value = pointerIn;
       lu.uPulse.value = pulse;
       // The cage belongs to the hero; it has no business around a landscape.
-      lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * Math.max(0, 1 - morphNow) * yieldFade;
+      lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * Math.max(0, 1 - morphNow) * yieldFade
+        * (1 - Math.min(1, release / 0.34));
       (lu.uMouse.value as Float32Array).set(mouse);
 
       pu.uMorph.value = morphNow;
-      pu.uOpacity.value = p.opacity * yieldFade;
+      pu.uOpacity.value = p.opacity * yieldFade * releaseFade;
 
       const ru = ringProgram.uniforms as any;
       // Fades in over the back half of the morph, once there is a terrain for

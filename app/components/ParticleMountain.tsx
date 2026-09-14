@@ -28,6 +28,7 @@
 import { useEffect, useRef } from "react";
 import { Renderer, Camera, Transform, Program, Mesh, Geometry } from "ogl";
 import { SIMPLEX_3D } from "../lib/noise";
+import { TRANSITION, clamp01, smoothstep } from "./transition";
 
 /* ── Configuration ────────────────────────────────────────────────────────
    Distances are scene units. The field spans `terrainWidth` across and runs
@@ -404,6 +405,118 @@ vec3 terrainNormal(vec2 p, float t, float e) {
 }
 `;
 
+
+
+/* ── The unravel ──────────────────────────────────────────────────────────
+   Where a particle is partway between the hero's vortex and its place on the
+   terrain.
+
+   The whole thing is expressed in cylindrical coordinates around the summit's
+   axis, which is what makes it read as a vortex untwisting rather than a cloud
+   being pulled apart. A particle's angle on the column IS its bearing from the
+   peak on the finished terrain, plus the accumulated twist; unravelling is
+   literally that twist unwinding back to zero. Its height on the column comes
+   from its distance from the peak, so the summit's own particles sit at the
+   mouth and the far ground sits at the base — the correspondence is spatial, so
+   neighbours travel together as readable strands.
+
+   Every term is a pure function of the particle's cell and the progress value,
+   with no accumulated state, so scrolling backwards retraces the same paths
+   exactly. */
+const UNRAVEL = `uniform float uTrans;      // 0 vortex, 1 terrain
+uniform float uTransTime;
+uniform vec2  uAxis;       // the summit, in (x, z)
+uniform float uVScale;
+uniform float uVCenterY;
+uniform float uVTwist;
+uniform float uVSpin;
+uniform float uFieldR;
+uniform float uDelayLow;
+uniform float uDelayHigh;
+uniform float uSpan;
+uniform float uJitter;
+uniform float uSwirl;
+uniform float uBow;
+uniform float uArc;
+
+/* Column height for a particle, 0 at the base and 1 at the mouth. */
+float columnV(vec2 cell) {
+  return 1.0 - clamp(length(cell - uAxis) / uFieldR, 0.0, 1.0);
+}
+
+/* How far along its journey this particle is. The base leaves first and becomes
+   the foreground; the mouth holds until last, so a peak stays standing while
+   everything under it spreads. */
+float settleOf(float v, float seed) {
+  float d = mix(uDelayLow, uDelayHigh, v) + (seed - 0.5) * uJitter;
+  float s = clamp((uTrans - d) / max(uSpan, 1e-3), 0.0, 1.0);
+  return s * s * (3.0 - 2.0 * s);
+}
+
+/* The hero's hourglass profile, in terrain units: a flared mouth above the
+   waist and a slower bloom below it. */
+float columnRadius(float v) {
+  float waist = 0.44;
+  float above = max(v - waist, 0.0);
+  float below = max(waist - v, 0.0);
+  return (0.5
+        + pow(above / (1.0 - waist), 2.3) * 2.75
+        + pow(below / waist, 2.0) * 1.155) * uVScale;
+}
+
+vec3 unravel(vec2 cell, float h, float seed, out float settle) {
+  float v = columnV(cell);
+  float s = settleOf(v, seed);
+  settle = s;
+  if (s > 0.999) return vec3(cell.x, h, cell.y);
+
+  vec2 d = cell - uAxis;
+  float rT = length(d);
+  float th = atan(d.y, d.x);
+  float rV = columnRadius(v);
+  float yV = (v - 0.5) * 8.4 * uVScale + uVCenterY;
+  float above = max(v - 0.44, 0.0);
+  float twist = uVTwist * pow(above, 1.4) + uTransTime * uVSpin * (0.45 + v * 0.9);
+
+  /* Three easings, not one. The twist lets go first, the radius spreads through
+     the middle, and the height settles last — which is the difference between a
+     strand sweeping out and a point sliding along a line. */
+  float eTwist = 1.0 - pow(1.0 - s, 2.2);
+  float eRad   = s * s * (3.0 - 2.0 * s);
+  float eY     = pow(s, 1.35);
+
+  float ang = th + (twist + uSwirl * 6.28318 * (0.3 + v)) * (1.0 - eTwist);
+  float rad = mix(rV, rT, eRad);
+  float bell = sin(3.14159 * s);
+  rad *= 1.0 + uBow * bell * (0.35 + (1.0 - v));
+  float y = mix(yV, h, eY) + uArc * bell * (0.25 + v * 0.9);
+
+  /* Thickness. Every particle at a given height would otherwise sit at exactly
+     the profile radius — an infinitely thin shell, which stacks into a solid
+     white wall rather than the cloth the hero's funnel reads as. Deterministic,
+     so it reverses with everything else. */
+  float k = 1.0 - s;
+  rad *= 1.0 + (fract(seed * 17.31) - 0.5) * 0.55 * k;
+  vec3 pos = vec3(uAxis.x + cos(ang) * rad, y, uAxis.y + sin(ang) * rad);
+  pos += vec3(sin(seed * 61.7), sin(seed * 37.1 + 1.7), sin(seed * 91.3 + 3.4))
+       * uVScale * 0.3 * k;
+  return pos;
+}
+
+/* How concentrated a particle is relative to where it will end up. On the
+   column a quarter of a million points occupy a few units of radius, and
+   additive blending turns that into a solid white bar; this is the factor that
+   keeps the funnel reading as particles. */
+float concentration(vec3 world, vec2 cell) {
+  float rNow = length(world.xz - uAxis);
+  /* Floored well above zero: the summit's own particles end up close to the
+     axis, and without a floor they would count as unconcentrated while still
+     bunched on the column. */
+  float rEnd = max(length(cell - uAxis), 20.0);
+  return clamp(rNow / rEnd, 0.035, 1.0);
+}
+`;
+
 /* Screen-space pointer push, shared by every layer — the occluder included, so
    a displaced surface still hides what is behind it. */
 const POINTER = `
@@ -459,6 +572,7 @@ uniform float uDebug;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
+${UNRAVEL}
 
 out float vShade;
 
@@ -476,7 +590,7 @@ void main() {
      occludes, and near geometry covers enough of the frame to cull the whole
      range behind it. Sent outside the clip volume rather than discarded, so it
      costs nothing downstream. */
-  if (dist < uCamDist * 0.22) {
+  if (dist < uCamDist * 0.22 || uDrop > 900.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
   }
@@ -528,6 +642,7 @@ uniform float uCamDist;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
+${UNRAVEL}
 
 out float vAlpha;
 
@@ -536,7 +651,12 @@ void main() {
   float crest;
   float h = terrainDetail(p, uTime, crest);
 
-  vec4 mv = modelViewMatrix * vec4(p.x, h, p.y, 1.0);
+  /* Partway through the transformation this is somewhere on the strand between
+     the column and the ground; at rest it is exactly the ground. */
+  float settle;
+  vec3 world = unravel(p, h, aRand.x, settle);
+
+  vec4 mv = modelViewMatrix * vec4(world, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
@@ -560,7 +680,10 @@ void main() {
   /* Density carried in alpha, not in the buffer: thinning the buffer would mean
      rebuilding it every time the terrain moved. Flats drop points, ridges keep
      all of theirs. */
-  float keep = step(aRand.z, mix(uValleyThin, 1.0, max(steep * 1.15, ridge)));
+  /* In flight almost every point is kept: thinning is a property of the
+     terrain's valleys, and there are no valleys yet. */
+  float keep = step(aRand.z, max(mix(0.92, uValleyThin, settle),
+                                 mix(0.0, max(steep * 1.15, ridge), settle)));
   /* Distance haze — without it the far range reads as the same flat sheet of
      dots as the foreground. */
   float fog = 1.0 - smoothstep(uCamDist * 1.5, uCamDist * 4.4, dist);
@@ -572,8 +695,17 @@ void main() {
   /* A wide per-point spread so the mass layers instead of reading flat, lifted
      on crests and again where the designed spines run. */
   float weight = mix(0.12, 0.8, aRand.x) * (0.42 + steep * 0.45 + ridge * uCrestGain);
-  vAlpha = keep * fog * uBrightness * uReveal * shimmer * weight
-         * terrainLight(nrm) * copyGuard(ndc);
+  /* Shading crosses over with the shape. Terrain slope and ridge terms describe
+     ground; a particle still on the column is lit by where it sits on the
+     column instead, or the vortex arrives pre-painted with a landscape. */
+  float vtx = mix(0.3, 0.95, aRand.y) * (0.45 + columnV(p) * 0.75)
+            * concentration(world, p);
+  weight = mix(vtx, weight, settle);
+  float lit = mix(1.0, terrainLight(nrm), settle);
+  /* The copy is not on screen until the transformation is nearly over, so the
+     guard that protects it stands down until then. */
+  float guard = mix(1.0, copyGuard(ndc), smoothstep(0.75, 1.0, uTrans));
+  vAlpha = keep * fog * uBrightness * uReveal * shimmer * weight * lit * guard;
 }
 `;
 
@@ -612,10 +744,13 @@ uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform float uReveal;
 uniform float uCamDist;
+uniform float uLineRev0;
+uniform float uLineRev1;
 
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
+${UNRAVEL}
 
 out float vAlpha;
 
@@ -624,7 +759,10 @@ void main() {
   float crest;
   float h = terrainLine(p, uTime, crest);
 
-  vec4 mv = modelViewMatrix * vec4(p.x, h, p.y, 1.0);
+  float settle;
+  vec3 world = unravel(p, h, aMeta.x, settle);
+
+  vec4 mv = modelViewMatrix * vec4(world, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
@@ -658,10 +796,15 @@ void main() {
   float near = smoothstep(-120.0, 10.0, p.y);
   float body = mix(0.5, 1.0, near);
 
-  vAlpha = fog * drawn * breaks * along * breath * body
+  /* Keyed to this vertex's own settle, not to global progress: a line only
+     draws over ground that has actually arrived, so the finished wire structure
+     is never visible under an unfinished vortex. */
+  float lineIn = smoothstep(uLineRev0, uLineRev1, settle);
+  float guard = mix(1.0, copyGuard(ndc), smoothstep(0.75, 1.0, uTrans));
+  vAlpha = fog * drawn * breaks * along * breath * body * lineIn
          * (0.6 + steep * 0.45 + ridge * 0.25)
          * (0.55 + terrainLight(nrm) * 0.7)
-         * (0.7 + seed * 0.45) * copyGuard(ndc);
+         * (0.7 + seed * 0.45) * guard;
 }
 `;
 
@@ -699,6 +842,7 @@ uniform float uPointSize;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
+${UNRAVEL}
 
 out float vAlpha;
 
@@ -707,7 +851,10 @@ void main() {
   float crest;
   float h = terrainBase(p, uTime, crest);
 
-  vec4 mv = modelViewMatrix * vec4(p.x, h, p.y, 1.0);
+  float settle;
+  vec3 world = unravel(p, h, fract(aMeta.x * 13.7), settle);
+
+  vec4 mv = modelViewMatrix * vec4(world, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
@@ -727,9 +874,13 @@ void main() {
   float breaks = smoothstep(-0.72, -0.26, wob);
   float drawn = clamp((uReveal - 0.06) * 2.4, 0.0, 1.0);
 
-  vAlpha = fog * drawn * breaks * (0.35 + steep * 0.6 + ridge * 0.6)
-         * terrainLight(nrm)
-         * (0.5 + fract(seed * 57.3) * 0.7) * copyGuard(ndc);
+  /* Beads ride the same curves as the lines, so they travel with the strand
+     and appear as it lands. */
+  float dotIn = mix(0.45, 1.0, settle) * mix(concentration(world, p), 1.0, settle);
+  float guard = mix(1.0, copyGuard(ndc), smoothstep(0.75, 1.0, uTrans));
+  vAlpha = fog * drawn * breaks * dotIn * (0.35 + steep * 0.6 + ridge * 0.6)
+         * mix(1.0, terrainLight(nrm), settle)
+         * (0.5 + fract(seed * 57.3) * 0.7) * guard;
 }
 `;
 
@@ -754,6 +905,7 @@ uniform float uDriftHeight;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
+${UNRAVEL}
 
 out float vAlpha;
 
@@ -763,7 +915,10 @@ void main() {
   float h = terrainBase(p, uTime, crest);
   h += (0.25 + aRand.z * 0.75) * uDriftHeight + sin(uTime * 1.7 + aRand.x * 31.4) * 0.5;
 
-  vec4 mv = modelViewMatrix * vec4(p.x, h, p.y, 1.0);
+  float settle;
+  vec3 world = unravel(p, h, aRand.y, settle);
+
+  vec4 mv = modelViewMatrix * vec4(world, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
@@ -773,7 +928,7 @@ void main() {
 
   gl_PointSize = clamp(1.5 * uDpr * (0.6 + aRand.z * 0.6) * (uCamDist * 1.3 / dist), 0.5, 2.0);
   float fog = 1.0 - smoothstep(uCamDist * 1.3, uCamDist * 3.6, dist);
-  vAlpha = uReveal * fog * (0.2 + aRand.x * 0.8) * copyGuard(ndc);
+  vAlpha = uReveal * fog * (0.2 + aRand.x * 0.8) * concentration(world, p) * copyGuard(ndc);
 }
 `;
 
@@ -848,6 +1003,9 @@ export interface ParticleMountainProps {
   hazeColor?: string;
   /** Scales the whole scene's opacity. */
   opacity?: number;
+  /** Progress through the vortex → terrain transformation, 0 to 1, read once
+   *  per frame. Omit and the terrain simply renders at rest. */
+  progressSource?: () => number;
   /** Development only: draws the depth occluder as a shaded surface so the
    *  silhouette can be judged without the particles on top of it. Never on in
    *  the delivered composition. */
@@ -861,6 +1019,7 @@ export default function ParticleMountain({
   color = "#E8EAF2",
   hazeColor = "#9BA6BF",
   opacity = 1,
+  progressSource,
   debugSurface = false,
   style,
   className,
@@ -939,6 +1098,27 @@ export default function ParticleMountain({
       uFgBack: { value: C.fgBack },
       uNearZ: { value: C.nearZ },
     };
+    const T = TRANSITION;
+    /* Shared by reference, like the terrain block: one progress value drives
+       every layer, so no part of the field can be at a different stage of the
+       transformation than another. */
+    const transUniforms = {
+      uTrans: { value: progressSource ? 0 : 1 },
+      uTransTime: { value: 0 },
+      uAxis: { value: new Float32Array([C.masses[0].x, C.masses[0].z]) },
+      uVScale: { value: T.vortexScale },
+      uVCenterY: { value: T.vortexCenterY },
+      uVTwist: { value: T.vortexTwist },
+      uVSpin: { value: T.vortexSpin },
+      uFieldR: { value: T.fieldRadius },
+      uDelayLow: { value: T.delayLow },
+      uDelayHigh: { value: T.delayHigh },
+      uSpan: { value: T.travelSpan },
+      uJitter: { value: T.jitter },
+      uSwirl: { value: T.swirlTurns },
+      uBow: { value: T.bow },
+      uArc: { value: T.arc },
+    };
     const pointerUniforms = {
       uMouse: { value: new Float32Array([0, -2]) },
       uAspect: { value: 1 },
@@ -985,6 +1165,7 @@ export default function ParticleMountain({
       uniforms: {
         ...terrainUniforms,
         ...pointerUniforms,
+        ...transUniforms,
         uPointSize: { value: C.pointSize },
         uDpr: { value: dpr },
         uBrightness: { value: C.brightness },
@@ -1036,6 +1217,7 @@ export default function ParticleMountain({
       uniforms: {
         ...terrainUniforms,
         ...pointerUniforms,
+        ...transUniforms,
         uDrop: { value: C.occluderDrop },
         uCamDist: { value: C.camZ },
         uDebug: { value: debugSurface ? 1 : 0 },
@@ -1109,9 +1291,12 @@ export default function ParticleMountain({
       uniforms: {
         ...terrainUniforms,
         ...pointerUniforms,
+        ...transUniforms,
         uReveal: { value: 0 },
         uCamDist: { value: C.camZ },
         uOpacity: { value: C.pathOpacity },
+        uLineRev0: { value: T.lineReveal[0] },
+        uLineRev1: { value: T.lineReveal[1] },
         uColor: { value: new Float32Array(hexToRgb(color)) },
       },
     });
@@ -1149,6 +1334,7 @@ export default function ParticleMountain({
       uniforms: {
         ...terrainUniforms,
         ...pointerUniforms,
+        ...transUniforms,
         uReveal: { value: 0 },
         uCamDist: { value: C.camZ },
         uDpr: { value: dpr },
@@ -1186,6 +1372,7 @@ export default function ParticleMountain({
       uniforms: {
         ...terrainUniforms,
         ...pointerUniforms,
+        ...transUniforms,
         uDpr: { value: dpr },
         uReveal: { value: 0 },
         uCamDist: { value: C.camZ },
@@ -1282,7 +1469,12 @@ export default function ParticleMountain({
     let visible = true;
     let pageVisible = !document.hidden;
     let clock = reduceMotion ? 12 : 0;
+    let transClock = 0;
     let reveal = 0;
+    let camDist = C.camZ;
+    /* Distance from the resting station to its aim, the yardstick the travelling
+       camera reports its own distance against. */
+    const restSpan = Math.hypot(C.camY - C.aimY, C.camZ - C.aimZ) || 1;
     let last = performance.now();
 
     const loop = (t: number) => {
@@ -1290,14 +1482,34 @@ export default function ParticleMountain({
       last = t;
       if (!reduceMotion) clock += dt * C.idleSpeed;
 
+      /* Progress through the transformation. Read straight from scroll, never
+         integrated, so holding still holds the shape and scrolling back
+         retraces it exactly. */
+      const raw = progressSource ? clamp01(progressSource()) : 1;
+      // Reduced motion gets the same transformation, done briefly.
+      const tr = reduceMotion ? clamp01(raw / T.reducedSpan) : raw;
+      if (!reduceMotion) transClock += dt;
+
       /* Reveal and push follow the section's place in the viewport, so the
          terrain assembles as it arrives and the camera keeps pressing forward
-         as the reader continues. */
+         as the reader continues. During the transformation the field is already
+         on screen, so it is simply present. */
       const rect = container.getBoundingClientRect();
       const enter = 1 - Math.max(0, Math.min(1, (rect.top + rect.height * 0.15) / (vh || 1)));
-      const through = Math.max(0, Math.min(1, -rect.top / Math.max(rect.height, 1)));
-      const wantReveal = reduceMotion ? 1 : Math.max(0, Math.min(1, enter * 1.25));
-      reveal += (wantReveal - reveal) * (1 - Math.exp(-dt * 3.2));
+      const through = progressSource
+        ? Math.max(0, Math.min(1, -rect.top / Math.max(rect.height, 1))) * smoothstep(0.98, 1, tr)
+        : Math.max(0, Math.min(1, -rect.top / Math.max(rect.height, 1)));
+      if (progressSource) {
+        /* The hero still owns the vortex at progress zero; this field fades up
+           underneath it over the release phase, so the two are never both at
+           full strength and there is no second sculpture. Set outright rather
+           than eased — an eased value would lag the scroll and the shape would
+           not retrace on the way back. */
+        reveal = smoothstep(0.02, 0.22, tr);
+      } else {
+        const wantReveal = reduceMotion ? 1 : Math.max(0, Math.min(1, enter * 1.25));
+        reveal += (wantReveal - reveal) * (1 - Math.exp(-dt * 3.2));
+      }
 
       const k = 1 - Math.exp(-dt * 5);
       mouse[0] += (mouseTarget[0] - mouse[0]) * k;
@@ -1307,20 +1519,59 @@ export default function ParticleMountain({
       /* Deliberately tiny. The camera should breathe with the pointer, not
          survey the scene from it — the silhouette has to stay put. */
       const par = reduceMotion ? 0 : C.parallax;
-      camera.position.set(
-        aimX + mouse[0] * par * 2.2,
-        C.camY + mouse[1] * par * 1.1,
-        C.camZ - through * C.scrollPush,
-      );
-      camera.lookAt([aimX, C.aimY + mouse[1] * par * 0.6, C.aimZ]);
+      const restX = aimX + mouse[0] * par * 2.2;
+      const restY = C.camY + mouse[1] * par * 1.1;
+      const restZ = C.camZ - through * C.scrollPush;
+      const restAimY = C.aimY + mouse[1] * par * 0.6;
+
+      if (progressSource && !reduceMotion && tr < 1) {
+        /* One continuous path. A short press toward the column while it is
+           still recognisable, then a long pull back as the landscape opens out
+           — and the aim eases across with it, so the horizon never rolls and
+           there is nothing to snap at the end. */
+        const e = smoothstep(T.camRange[0], T.camRange[1], tr);
+        const push = Math.sin(Math.min(tr / T.camRange[0], 1) * Math.PI) * T.camPush;
+        const cx = T.camStart[0] + (restX - T.camStart[0]) * e;
+        const cy = T.camStart[1] + (restY - T.camStart[1]) * e;
+        const cz = T.camStart[2] + (restZ - T.camStart[2]) * e - push * (1 - e);
+        const ax = T.aimStart[0] + (aimX - T.aimStart[0]) * e;
+        const ay = T.aimStart[1] + (restAimY - T.aimStart[1]) * e;
+        const az = T.aimStart[2] + (C.aimZ - T.aimStart[2]) * e;
+        camera.position.set(cx, cy, cz);
+        camera.lookAt([ax, ay, az]);
+        /* Fog and point size are calibrated against the resting station's
+           distance to its aim, so the travelling camera has to report the same
+           quantity rather than a raw z that changes sign along the way. */
+        const dx = cx - ax, dy = cy - ay, dz = cz - az;
+        camDist = (Math.sqrt(dx * dx + dy * dy + dz * dz) / restSpan) * C.camZ;
+      } else {
+        camera.position.set(restX, restY, restZ);
+        camera.lookAt([aimX, restAimY, C.aimZ]);
+        camDist = restZ;
+      }
 
       terrainUniforms.uTime.value = clock;
+      transUniforms.uTrans.value = tr;
+      transUniforms.uTransTime.value = transClock;
+      /* Cursor displacement stands down while the field is in flight: it has
+         nothing to say about a shape that is already moving, and it would fight
+         the choreography. */
+      const pointerGain = allowPointer ? smoothstep(T.pointerFade[0], T.pointerFade[1], tr) : 0;
       for (const prog of pointerPrograms) {
         const u = prog.uniforms as any;
         (u.uMouse.value as Float32Array).set(mouse);
         u.uPointerIn.value = pointerIn;
-        u.uCamDist.value = camera.position.z;
+        u.uPointerForce.value = C.pointerForce * pointerGain;
+        u.uCamDist.value = camDist;
       }
+      /* The invisible surface stays off until the ground under it exists, then
+         rises into place. Writing a finished terrain's depth beneath a field
+         still in flight would cull the travelling particles outright. */
+      (occluderProgram.uniforms.uDrop.value as number) =
+        tr < T.occluderOn
+          ? 1000
+          : C.occluderDrop + (T.occluderDropFrom - C.occluderDrop)
+            * (1 - smoothstep(T.occluderRamp[0], T.occluderRamp[1], tr));
       for (const prog of revealPrograms) {
         (prog.uniforms as any).uReveal.value = reveal * opacity;
       }
@@ -1391,7 +1642,7 @@ export default function ParticleMountain({
       if (ext) ext.loseContext();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, color, hazeColor, opacity, debugSurface]);
+  }, [config, color, hazeColor, opacity, debugSurface, progressSource]);
 
   return (
     <div
