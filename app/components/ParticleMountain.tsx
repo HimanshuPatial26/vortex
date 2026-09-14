@@ -260,6 +260,7 @@ uniform float uFgAmp;
 uniform float uFgScale;
 uniform float uFgFront;
 uniform float uFgBack;
+uniform float uNearZ;
 
 float fbm3(vec2 p, float t) {
   return snoise(vec3(p, t)) * 0.5
@@ -315,8 +316,14 @@ float terrainFlow(vec2 p, float t, out float crest, out float local) {
      long branching channels between ridges, not a bed of nails. */
   float h = sk - (1.0 - rg) * uAmpRidge * w + fb * uAmpFbm * (uDetailFloor + local * 0.55);
 
-  /* Broad rolling undulation, ramping up toward the camera: the foreground. */
-  float near = smoothstep(uFgBack, uFgFront, p.y);
+  /* Broad rolling undulation, ramping up toward the camera: the foreground.
+
+     Tapered again over the last stretch before the lens. The camera sits at
+     about y = 8 and these swells reach nearly 7, so the nearest one can rise
+     past it — and a swell in front of the lens fills the frame and, because the
+     occluder writes its depth, takes the entire range behind it with it. The
+     band being flattened is below the bottom edge anyway. */
+  float near = smoothstep(uFgBack, uFgFront, p.y) * smoothstep(uNearZ + 1.0, uNearZ - 14.0, p.y);
   h += snoise(vec3(p * uFgScale, 0.0)) * uFgAmp * near;
   h += snoise(vec3(p * uFgScale * 2.37 + 9.0, t * 0.6)) * uFgAmp * 0.42 * near;
   h += snoise(vec3(p * uFgScale * 5.1 + 27.0, t * 1.1)) * uFgAmp * 0.1 * near;
@@ -374,7 +381,7 @@ float terrainCoarse(vec2 p, float t) {
   float rg = r0 * r0 * 0.64 + r1 * r1 * 0.36;
   float local = clamp(sk / 30.0, 0.0, 1.0);
   float h = sk - (1.0 - rg) * uAmpRidge * (uDetailFloor + local);
-  float near = smoothstep(uFgBack, uFgFront, p.y);
+  float near = smoothstep(uFgBack, uFgFront, p.y) * smoothstep(uNearZ + 1.0, uNearZ - 14.0, p.y);
   h += snoise(vec3(p * uFgScale, 0.0)) * uFgAmp * near;
   return h;
 }
@@ -456,19 +463,29 @@ ${POINTER}
 out float vShade;
 
 void main() {
+  vShade = 0.0;
   float crest;
   float h = terrainBase(aCell, uTime, crest) - uDrop;
   vec4 mv = modelViewMatrix * vec4(aCell.x, h, aCell.y, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
+
+  /* The visible layers fade the closest ground out; the occluder has to stand
+     down over the same band. Depth written by ground nobody can see still
+     occludes, and near geometry covers enough of the frame to cull the whole
+     range behind it. Sent outside the clip volume rather than discarded, so it
+     costs nothing downstream. */
+  if (dist < uCamDist * 0.22) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
   /* The same displacement the visible layers get. A surface that did not move
      with them would occlude the wrong things the moment the cursor arrived. */
   ndc += pointerPush(ndc, clamp(uCamDist / dist, 0.3, 2.0));
   clip.xy = ndc * clip.w;
   gl_Position = clip;
 
-  vShade = 0.0;
   if (uDebug > 0.5) {
     vec3 n = terrainNormal(aCell, uTime, 1.4);
     vShade = 0.1 + 0.9 * max(dot(n, normalize(vec3(-0.35, 0.85, 0.4))), 0.0);
@@ -920,6 +937,7 @@ export default function ParticleMountain({
       uFgScale: { value: C.fgScale },
       uFgFront: { value: C.fgFront },
       uFgBack: { value: C.fgBack },
+      uNearZ: { value: C.nearZ },
     };
     const pointerUniforms = {
       uMouse: { value: new Float32Array([0, -2]) },
@@ -1311,8 +1329,17 @@ export default function ParticleMountain({
       /* Two passes. The occluder lays down depth with the colour mask closed,
          then the visible layers draw against that depth buffer — which is what
          keeps the back of the range from shining through its own front. The
-         clear has to happen with the mask open, so it is done by hand rather
-         than left to the renderer. */
+         clear has to happen with the colour mask open, so it is done by hand
+         rather than left to the renderer.
+
+         Both masks. glClear honours the depth write mask, and every visible
+         layer runs with depthWrite off — so from the second frame onward the
+         depth clear silently does nothing and the buffer becomes a running
+         minimum of every camera position the scene has ever had. The far
+         range fails against it and the mountain disappears, leaving only the
+         near ground. Nothing shows this at one frame; it needs the camera to
+         move. */
+      renderer.setDepthMask(true);
       gl.colorMask(true, true, true, true);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       if (!debugSurface) {
