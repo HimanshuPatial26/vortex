@@ -13,7 +13,7 @@ import VortexScene from "./components/VortexScene";
 import HeroVortex from "./components/HeroVortex";
 import MountainHUD from "./components/MountainHUD";
 import { color, font } from "./theme";
-import { TRANSITION, transitionProgress, smoothstep } from "./components/transition";
+import { TRANSITION, transitionProgress, unravelProgress, smoothstep } from "./components/transition";
 import { useCallback, useEffect, useRef } from "react";
 
 // Its own WebGL context, so it only mounts on the client.
@@ -43,7 +43,7 @@ function useTransitionFade(range: [number, number], invert = false) {
     const tick = () => {
       const el = ref.current;
       if (el) {
-        const p = transitionProgress("next");
+        const p = unravelProgress(transitionProgress("next"));
         const f = smoothstep(range[0], range[1], p);
         el.style.opacity = String(invert ? 1 - f : f);
       }

@@ -1048,10 +1048,12 @@ export default function ParticleVortex({
          field goes with it; the spin eases off so the column is visibly
          slowing rather than cut mid-turn. */
       const release = p.releaseSource ? Math.max(0, Math.min(1, p.releaseSource())) : 0;
-      const releaseFade = 1 - Math.min(1, Math.max(0, (release - 0.03) / 0.27));
-      lines.scale.set(1 + release * 0.34, 1 + release * 0.1, 1 + release * 0.62);
-      (pointProgram.uniforms.uSpin.value as number) = p.spinSpeed * (1 - release * 0.82);
-      (pointProgram.uniforms.uFlow.value as number) = p.flowSpeed * (1 - release * 0.6);
+      /* Gone by the time the hero's copy has finished leaving: the point of the
+         release is that the field hands over during the hero, not after it. */
+      const releaseFade = 1 - Math.min(1, Math.max(0, (release - 0.02) / 0.16));
+      lines.scale.set(1 + release * 0.9, 1 + release * 0.26, 1 + release * 1.7);
+      (pointProgram.uniforms.uSpin.value as number) = p.spinSpeed * (1 - Math.min(1, release / 0.2) * 0.82);
+      (pointProgram.uniforms.uFlow.value as number) = p.flowSpeed * (1 - Math.min(1, release / 0.2) * 0.6);
 
       const target = p.morphSource ? p.morphSource() : p.morph;
 
@@ -1153,7 +1155,7 @@ export default function ParticleVortex({
       lu.uPulse.value = pulse;
       // The cage belongs to the hero; it has no business around a landscape.
       lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * Math.max(0, 1 - morphNow) * yieldFade
-        * (1 - Math.min(1, release / 0.34));
+        * (1 - Math.min(1, release / 0.17));
       (lu.uMouse.value as Float32Array).set(mouse);
 
       pu.uMorph.value = morphNow;

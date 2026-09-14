@@ -18,14 +18,25 @@
 export const TRANSITION = {
   /** Viewports of scroll the transformation occupies. */
   scrollVh: 2.1,
+  /** Viewports of the hero's own tail that the transformation reaches back
+   *  into. The handover has to happen while the hero is still on screen: park
+   *  it after the hero and the reader gets a second full-screen vortex, framed
+   *  and captionless, which reads as the hero all over again. */
+  leadVh: 0.45,
+  /** Where inside that lead the field changes hands — late enough that the
+   *  pinned stage is almost in place, early enough that the hero's copy is
+   *  still leaving. */
+  handover: [0.12, 0.185] as [number, number],
 
   /* ── Per-particle travel ────────────────────────────────────────────────
      Each particle leaves on its own schedule. The bottom of the column goes
      first and becomes the foreground; the summit holds its height until last,
      which is what keeps a recognisable peak standing while everything below it
      spreads out. */
-  /** When the lowest strands start, as progress. */
-  delayLow: 0.1,
+  /** When the lowest strands start, as progress. Zero: the base begins shedding
+   *  the instant the field changes hands, so there is never a beat where a
+   *  fresh vortex simply stands there. */
+  delayLow: 0.0,
   /** When the summit strands start. */
   delayHigh: 0.44,
   /** How much of the transition one particle's journey takes. */
@@ -102,12 +113,28 @@ export const smoothstep = (a: number, b: number, v: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/** Fraction of the whole progress window that is the hero's tail. The unravel
+ *  proper runs over what is left. */
+export const LEAD_FRACTION =
+  TRANSITION.leadVh / (TRANSITION.scrollVh + TRANSITION.leadVh);
+
 /** Progress through the transformation, from the transition section's position.
+ *  Starts `leadVh` viewports before the section reaches the top, so the hero
+ *  releases and the field changes hands while the hero is still leaving.
  *  Pure in scrollY: reversing scroll retraces the same path. */
-export const transitionProgress = (sectionId: string, scrollVh = TRANSITION.scrollVh) => {
+export const transitionProgress = (
+  sectionId: string,
+  scrollVh = TRANSITION.scrollVh,
+  leadVh = TRANSITION.leadVh,
+) => {
   const el = document.getElementById(sectionId);
   if (!el) return 1;
   const top = el.getBoundingClientRect().top;
-  const span = Math.max(window.innerHeight * scrollVh, 1);
-  return clamp01(-top / span);
+  const vh = window.innerHeight;
+  const lead = vh * leadVh;
+  return clamp01((lead - top) / Math.max(vh * scrollVh + lead, 1));
 };
+
+/** The unravel's own progress, with the handover lead taken back off. */
+export const unravelProgress = (raw: number) =>
+  clamp01((raw - LEAD_FRACTION) / (1 - LEAD_FRACTION));

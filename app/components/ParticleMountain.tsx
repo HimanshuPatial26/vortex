@@ -28,7 +28,7 @@
 import { useEffect, useRef } from "react";
 import { Renderer, Camera, Transform, Program, Mesh, Geometry } from "ogl";
 import { SIMPLEX_3D } from "../lib/noise";
-import { TRANSITION, clamp01, smoothstep } from "./transition";
+import { TRANSITION, clamp01, smoothstep, unravelProgress } from "./transition";
 
 /* ── Configuration ────────────────────────────────────────────────────────
    Distances are scene units. The field spans `terrainWidth` across and runs
@@ -1486,8 +1486,12 @@ export default function ParticleMountain({
          integrated, so holding still holds the shape and scrolling back
          retraces it exactly. */
       const raw = progressSource ? clamp01(progressSource()) : 1;
+      /* Two numbers off one source: `raw` spans the handover as well, and drives
+         only this field's arrival; `tr` is the unravel itself. */
+      const arrived = progressSource ? smoothstep(T.handover[0], T.handover[1], raw) : 1;
+      const unravel = progressSource ? unravelProgress(raw) : 1;
       // Reduced motion gets the same transformation, done briefly.
-      const tr = reduceMotion ? clamp01(raw / T.reducedSpan) : raw;
+      const tr = reduceMotion ? clamp01(unravel / T.reducedSpan) : unravel;
       if (!reduceMotion) transClock += dt;
 
       /* Reveal and push follow the section's place in the viewport, so the
@@ -1500,12 +1504,12 @@ export default function ParticleMountain({
         ? Math.max(0, Math.min(1, -rect.top / Math.max(rect.height, 1))) * smoothstep(0.98, 1, tr)
         : Math.max(0, Math.min(1, -rect.top / Math.max(rect.height, 1)));
       if (progressSource) {
-        /* The hero still owns the vortex at progress zero; this field fades up
-           underneath it over the release phase, so the two are never both at
-           full strength and there is no second sculpture. Set outright rather
-           than eased — an eased value would lag the scroll and the shape would
-           not retrace on the way back. */
-        reveal = smoothstep(0.02, 0.22, tr);
+        /* The hero still owns the vortex through the lead; this field fades up
+           underneath it as the hero leaves, so the two are never both at full
+           strength and the reader never meets a second sculpture. Set outright
+           rather than eased — an eased value would lag the scroll and the shape
+           would not retrace on the way back. */
+        reveal = arrived;
       } else {
         const wantReveal = reduceMotion ? 1 : Math.max(0, Math.min(1, enter * 1.25));
         reveal += (wantReveal - reveal) * (1 - Math.exp(-dt * 3.2));

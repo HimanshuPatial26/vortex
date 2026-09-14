@@ -291,6 +291,20 @@ Three easings run at different rates: the twist lets go first, the radius spread
 through the middle, the height settles last. That is the difference between a
 strand sweeping out and a point sliding along a line.
 
+### Where the handover goes
+
+The field changes hands from the hero's canvas to the mountain's, and where that
+happens matters more than how it is blended. Parking it after the hero gave the
+reader a second full-screen vortex — framed, captionless, camera centred on it —
+which reads as the hero all over again rather than as a transition.
+
+So the progress window reaches `TRANSITION.leadVh` viewports back into the
+hero's own tail. The hero releases while it is still on screen: its frames open
+outward and in depth and fade, its spin eases off, its field hands over. By the
+time the hero's copy has finished leaving, the column on screen is the
+mountain's and its base is already shedding — `delayLow` is zero, so there is
+never a beat where a fresh vortex simply stands there.
+
 ### Timing
 
 Each particle leaves on its own schedule — base first, summit last — so a
