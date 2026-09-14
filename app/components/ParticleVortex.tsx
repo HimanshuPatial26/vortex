@@ -1135,12 +1135,14 @@ export default function ParticleVortex({
       /* Yield: 1 normally, 0 across the range where another component owns the
          frame, ramping over a quarter of a stage at each end. */
       let yieldFade = 1;
+      let yieldBack = 1;
       if (p.yieldRange) {
         const [y0, y1] = p.yieldRange;
         const ramp = 0.25;
         const rise = Math.max(0, Math.min(1, (morphNow - (y0 - ramp)) / ramp));
         const fall = Math.max(0, Math.min(1, (morphNow - y1) / ramp));
         yieldFade = 1 - rise * (1 - fall);
+        yieldBack = fall;
       }
 
       const pu = pointProgram.uniforms as any;
@@ -1159,7 +1161,11 @@ export default function ParticleVortex({
       (lu.uMouse.value as Float32Array).set(mouse);
 
       pu.uMorph.value = morphNow;
-      pu.uOpacity.value = p.opacity * yieldFade * releaseFade;
+      /* The release fade hands the field off at the hero; the yield range brings
+         it back for the next form. Multiplying the two would hold it at zero
+         forever, because the release only ever runs one way — so the return
+         lifts it instead. */
+      pu.uOpacity.value = p.opacity * Math.min(yieldFade, Math.max(releaseFade, yieldBack));
 
       const ru = ringProgram.uniforms as any;
       // Fades in over the back half of the morph, once there is a terrain for

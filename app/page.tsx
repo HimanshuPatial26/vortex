@@ -69,9 +69,17 @@ export default function Page() {
        of the transformation rather than skipping to its end. */
     <VortexScene
       sections={["rest", "third"]}
-      advanceTo={["next", "third"]}
+      /* A click continues to the landscape, and the transformation plays out
+         under the scroll on the way — landing at its start would leave the
+         reader with two more viewports to scroll before anything formed. */
+      advanceTo={["rest", "third"]}
+      /* The transformation replaces the scatter that used to mark this
+         boundary; only the dunes handover still wants one. */
+      splashAt={[1.9]}
       releaseSource={progress}
-      yieldRange={[0.72, 1.88]}
+      /* The upper end has to clear its own ramp before the morph axis tops
+         out, or the field only ever comes half way back for the dunes. */
+      yieldRange={[0.72, 1.7]}
     >
       <HeroVortex renderCanvas={false} />
 

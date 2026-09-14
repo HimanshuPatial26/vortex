@@ -37,6 +37,9 @@ export interface VortexSceneProps {
   morphSpan?: number;
   /** Where a click advances to, if that is not the morph stops themselves. */
   advanceTo?: string[];
+  /** Morph positions that scatter the field as the page passes them. Defaults
+   *  to one just past each stage boundary. */
+  splashAt?: number[];
   /** Progress through the hero's release, read once per frame. */
   releaseSource?: () => number;
   /** Milliseconds a click-advance scroll takes. */
@@ -65,6 +68,7 @@ export default function VortexScene({
   sections = [],
   morphSpan = 1,
   advanceTo,
+  splashAt: splashAtProp,
   releaseSource,
   advanceDuration = 1100,
   onSplash,
@@ -101,8 +105,8 @@ export default function VortexScene({
      handover exactly as a click does. A click's own splash suppresses the one
      its scroll would otherwise trigger, so they never double up. */
   const splashAt = useMemo(
-    () => sections.map((_, i) => i + 0.22),
-    [sections],
+    () => splashAtProp ?? sections.map((_, i) => i + 0.22),
+    [splashAtProp, sections],
   );
 
   // A click advances to whichever section comes next from where the page is.
@@ -110,8 +114,15 @@ export default function VortexScene({
     onSplash?.();
     const stops = advanceTo ?? sections;
     if (!stops.length) return;
-    const here = Math.round(window.scrollY / Math.max(window.innerHeight, 1));
-    const id = stops[Math.min(here, stops.length - 1)];
+    /* The first stop that is still meaningfully below the fold. Rounding
+       scrollY into viewports picked the wrong one as soon as a section stopped
+       being one viewport tall — which is how a click from the hero landed at
+       the start of the transformation instead of at the landscape. */
+    const id =
+      stops.find((s) => {
+        const el = document.getElementById(s);
+        return el && el.getBoundingClientRect().top > window.innerHeight * 0.3;
+      }) ?? stops[stops.length - 1];
     if (id) scrollTo(id);
   }, [onSplash, sections, advanceTo, scrollTo]);
 

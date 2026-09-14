@@ -41,6 +41,14 @@ export function useAdvanceScroll(defaultTargetId?: string, duration = 1100) {
       return;
     }
 
+    /* Longer hops take proportionally longer, but sub-linearly. A stop three
+       viewports away is a scroll-driven transformation, not a jump between
+       adjacent sections, and a fixed duration flings straight through it —
+       while scaling one-for-one would make the short hop to the next section
+       drag. */
+    const spans = Math.abs(delta) / Math.max(window.innerHeight, 1);
+    const dur = duration * Math.min(Math.max(Math.pow(spans, 0.62), 1), 2.4);
+
     if (raf.current !== null) cancelAnimationFrame(raf.current);
 
     // Hand the scroll straight back if the visitor takes over mid-flight.
@@ -62,7 +70,7 @@ export function useAdvanceScroll(defaultTargetId?: string, duration = 1100) {
 
     const t0 = performance.now();
     const step = (now: number) => {
-      const t = Math.min((now - t0) / duration, 1);
+      const t = Math.min((now - t0) / dur, 1);
       const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
       window.scrollTo(window.scrollX, startY + delta * e);
       if (t < 1) {
