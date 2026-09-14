@@ -28,10 +28,11 @@ export const TRANSITION = {
    *  it after the hero and the reader gets a second full-screen vortex, framed
    *  and captionless, which reads as the hero all over again. */
   leadVh: 0.35,
-  /** Where inside that lead the field changes hands — late enough that the
-   *  pinned stage is almost in place, early enough that the hero's copy is
-   *  still leaving. */
-  handover: [0.12, 0.185] as [number, number],
+  /** Where the field changes hands. Must sit past LEAD_FRACTION, where the
+   *  stage finishes pinning: before that the stage covers only part of the
+   *  viewport, and a field fading up inside it shows the canvas's own top edge
+   *  as a hard line across the frame. */
+  handover: [0.26, 0.34] as [number, number],
 
   /* ── Per-particle travel ────────────────────────────────────────────────
      Each particle leaves on its own schedule. The bottom of the column goes
@@ -43,48 +44,51 @@ export const TRANSITION = {
    *  fresh vortex simply stands there. */
   delayLow: 0.0,
   /** When the summit strands start. */
-  delayHigh: 0.44,
-  /** How much of the transition one particle's journey takes. */
-  travelSpan: 0.42,
+  delayHigh: 0.28,
+  /** How much of the transition one particle's journey takes. Long, and the
+   *  delays short: the field should be visibly in flight across the whole
+   *  middle of the transformation rather than landing in the first half and
+   *  then waiting. */
+  travelSpan: 0.66,
   /** Deterministic per-particle scatter on that schedule. */
   jitter: 0.07,
 
-  /* ── The vortex ─────────────────────────────────────────────────────────
-     The hero's own hourglass profile, scaled into terrain units and stood on
-     the summit's axis. */
-  vortexScale: 3.9,
-  vortexCenterY: 13.5,
-  /** Turns of twist between waist and mouth, unwound as the strands settle. */
-  vortexTwist: 14,
-  vortexSpin: 0.34,
-  /** Terrain radius from the summit that maps to the bottom of the column. */
-  fieldRadius: 118,
+  /* ── The scatter ────────────────────────────────────────────────────────
+     Screen space, not scene units. The disc has to reach past 1.414 — the
+     corner of the frame in normalised device coordinates — or the burst leaves
+     the corners empty. */
+  scatter: 1.55,
+  /** How far either side of the landscape's own depth the scattered field is
+   *  thrown, for size and haze variation on the way in. */
+  scatterDepth: 1.0,
+  /** How far down the scattered field is held. A quarter of a million points
+   *  spread over the whole frame is a grey wash at full strength. */
+  scatterFade: 0.4,
+  /** Slow rotation of the scattered field while it hangs there. */
+  drift: 0.18,
 
   /* ── Trajectory shaping ─────────────────────────────────────────────────
-     Straight interpolation makes the vortex look like it is being pulled apart
-     mechanically. These bend every path. */
-  /** Extra turns a strand sweeps through on its way out. */
-  swirlTurns: 0.5,
-  /** How far a strand bows past its destination radius mid-flight. */
-  bow: 0.26,
-  /** How high a strand arcs mid-flight, in scene units. */
-  arc: 5,
+     A field of points each sliding down its own straight line reads as a wipe.
+     These bend the approach. */
+  /** Radians the scatter rotates about the frame centre as it comes in. */
+  swirl: 0.55,
+  /** How far a path bows off the straight line to its destination, in ndc. */
+  bow: 0.18,
 
   /* ── Camera ─────────────────────────────────────────────────────────────
-     One continuous path: a short push toward the column, then a long pull back
-     as the landscape opens out. Interpolated with lookAt, so the horizon never
-     rolls. */
-  camStart: [5, 14, 12] as [number, number, number],
-  aimStart: [5, 13, -50] as [number, number, number],
-  /** Scene units the camera presses forward over the release phase. */
-  camPush: 7,
+     Expressed as an offset from the resting station rather than an absolute
+     one, so it holds at every viewport: a short push toward the landscape while
+     the field is still loose, easing back as it lands. The aim never moves, so
+     the horizon cannot roll and there is nothing to snap at the end. */
+  camPush: 16,
+  camLift: 3.5,
   /** Progress range the camera travels over. */
-  camRange: [0.1, 0.94] as [number, number],
+  camRange: [0.05, 0.95] as [number, number],
 
   /* ── Reveals ────────────────────────────────────────────────────────────
      Keyed to each particle's own settle, not to global progress, so a line only
      appears over ground that has actually arrived. */
-  lineReveal: [0.68, 0.99] as [number, number],
+  lineReveal: [0.7, 0.99] as [number, number],
   /** Progress at which the invisible depth surface starts occluding, and the
    *  range over which it rises to its final height. Before this it is off
    *  entirely: a finished terrain writing depth under an unfinished vortex
@@ -140,6 +144,6 @@ export const transitionProgress = (
   return clamp01((lead - top) / Math.max(vh * scrollVh + lead, 1));
 };
 
-/** The unravel's own progress, with the handover lead taken back off. */
+/** The gather's own progress, with the handover lead taken back off. */
 export const unravelProgress = (raw: number) =>
   clamp01((raw - LEAD_FRACTION) / (1 - LEAD_FRACTION));

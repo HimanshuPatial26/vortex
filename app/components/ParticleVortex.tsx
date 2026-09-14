@@ -1048,9 +1048,10 @@ export default function ParticleVortex({
          field goes with it; the spin eases off so the column is visibly
          slowing rather than cut mid-turn. */
       const release = p.releaseSource ? Math.max(0, Math.min(1, p.releaseSource())) : 0;
-      /* Gone by the time the hero's copy has finished leaving: the point of the
-         release is that the field hands over during the hero, not after it. */
-      const releaseFade = 1 - Math.min(1, Math.max(0, (release - 0.02) / 0.16));
+      /* Overlaps the landscape's arrival rather than clearing before it. Both
+         fields are scattered particles by then, so the two burst states read as
+         one and the handover has nothing recognisable to give it away. */
+      const releaseFade = 1 - Math.min(1, Math.max(0, (release - 0.08) / 0.24));
       lines.scale.set(1 + release * 0.9, 1 + release * 0.26, 1 + release * 1.7);
       (pointProgram.uniforms.uSpin.value as number) = p.spinSpeed * (1 - Math.min(1, release / 0.2) * 0.82);
       (pointProgram.uniforms.uFlow.value as number) = p.flowSpeed * (1 - Math.min(1, release / 0.2) * 0.6);

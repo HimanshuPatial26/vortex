@@ -261,87 +261,74 @@ off-screen.
 
 ## The transition
 
-The vortex does not cross-fade into the mountain; it unravels into it. Between
-the two resting states sits `TRANSITION.scrollVh` viewports of scroll with the
-stage pinned — about one screen. A pin is a stall: the page stops moving while
-the transformation runs, and two viewports of that reads as the scroll having
-jammed between two sections rather than as one section becoming the next. Every
-knob for the choreography lives in one object in
-`components/transition.ts` — scroll length, phase timings, spread, unravelling
-strength, path curvature, camera path, line reveal and text fades — because the
-sequence is split across three places that all have to agree.
+The hero's field bursts, the burst fills the frame, and the landscape gathers
+out of it. Between the two resting states sits `TRANSITION.scrollVh` viewports
+of scroll with the stage pinned — about one screen. A pin is a stall: the page
+stops moving while the transformation runs, and two viewports of that reads as
+the scroll having jammed between two sections rather than as one section
+becoming the next. Every knob for the choreography lives in one object in
+`components/transition.ts`, because the sequence is split across three places
+that all have to agree: the hero's field, the mountain, and the page's copy.
 
-### The mapping
+### The scatter is in screen space
 
-Every mountain particle already has a place on the terrain. The transition gives
-it a second one on the column, and the correspondence is spatial rather than
-arbitrary:
+A splash is something that happens to the picture. Spreading the field in scene
+units piles its far half into the middle of the frame and leaves the corners
+empty; a disc in normalised device coordinates covers exactly what the viewer
+can see. The disc reaches past 1.414 — the corner of the frame in those
+coordinates — so the burst spills off every edge.
 
-- A particle's **angle** on the column is its bearing from the summit on the
-  finished terrain, plus the accumulated twist. Unravelling is literally that
-  twist unwinding back to zero.
-- Its **height** on the column comes from its distance from the summit. The
-  peak's own particles sit at the mouth; the far ground sits at the base.
+Each particle starts at a point on that disc and travels to wherever its terrain
+position happens to project, along a bowed and slightly swept path rather than a
+straight one: a field of points each sliding down its own straight line reads as
+a wipe. Its depth travels too, from somewhere much nearer or much further than
+the landscape to the landscape's own, so the field has size and haze variation
+on the way in instead of reading as flat confetti.
 
-So neighbours travel together as readable strands, the upper column feeds the
-summit and upper ridges, and the base sweeps out into the foreground. The whole
-thing is expressed in cylindrical coordinates around the summit's axis, which is
-what makes it read as a vortex untwisting rather than a cloud being pulled
-apart — and it means the paths are curved by construction, with no control
-points to invent.
+Low ground gathers first and the summit last, so the landscape builds upward out
+of the scatter rather than fading in all at once. Delays are short and each
+particle's journey long, so the field is visibly in flight across the whole
+middle of the transformation instead of landing in the first half and waiting.
 
-Three easings run at different rates: the twist lets go first, the radius spreads
-through the middle, the height settles last. That is the difference between a
-strand sweeping out and a point sliding along a line.
+### Why this hands over cleanly
 
-### Where the handover goes
-
-The field changes hands from the hero's canvas to the mountain's, and where that
-happens matters more than how it is blended. Parking it after the hero gave the
-reader a second full-screen vortex — framed, captionless, camera centred on it —
-which reads as the hero all over again rather than as a transition.
-
-So the progress window reaches `TRANSITION.leadVh` viewports back into the
-hero's own tail. The hero releases while it is still on screen: its frames open
-outward and in depth and fade, its spin eases off, its field hands over. By the
-time the hero's copy has finished leaving, the column on screen is the
-mountain's and its base is already shedding — `delayLow` is zero, so there is
-never a beat where a fresh vortex simply stands there.
-
-### Timing
-
-Each particle leaves on its own schedule — base first, summit last — so a
-recognisable peak stands while everything under it spreads. Every term is a pure
-function of the particle's cell and the scroll position, with nothing
-integrated, so holding still holds the shape and scrolling back retraces the
-same paths.
+There are two canvases — the hero's field and the mountain's — and the
+transformation reaches `TRANSITION.leadVh` viewports back into the hero's tail
+so they change hands while the hero is still on screen. Both are scattered
+particles at that moment, and a scattered field has no structure to recognise,
+so there is nothing for the crossfade to give away. The handover itself sits
+just past the point where the stage finishes pinning: earlier than that the
+stage covers only part of the viewport, and a field fading up inside it shows
+the canvas's own top edge as a hard line across the frame.
 
 ### What had to be coordinated
 
-- **The lines** are keyed to each vertex's own settle, not to global progress, so
-  a line only draws over ground that has arrived. The finished wire structure is
-  never visible under an unfinished vortex.
+- **Lines do not scatter — they wait.** A strip only reads as a line while its
+  vertices stay in order, and scattering each one independently turns it into a
+  tangle. A line stays on the ground it describes and is simply not drawn until
+  that ground has arrived.
 - **The depth occluder** stays off until the ground under it exists, then rises
   into place. A finished terrain writing depth beneath a field still in flight
   would cull the travelling particles outright.
-- **Shading** crosses over with the shape. Slope and ridge terms describe ground;
-  a particle still on the column is lit by where it sits on the column, or the
-  vortex arrives pre-painted with a landscape.
-- **Density.** A quarter of a million points squeezed into a few units of radius
-  is a solid white bar under additive blending. Every layer scales its alpha by
-  how concentrated it currently is relative to where it will end up.
+- **Shading** crosses over with the shape. Slope and ridge terms describe
+  ground; a particle still in the air has none, so it carries a flat weight
+  until it lands.
+- **Exposure.** A quarter of a million points spread over the whole frame is a
+  grey wash at full strength, so the scattered field is held well down and comes
+  up as it lands. A narrow frame runs fewer particles over the same area, so it
+  gets a tighter disc and brighter grains.
 - **Cursor displacement** stands down while the field is in flight.
 
-The camera runs one continuous path — a short press toward the column, then a
-long pull back as the landscape opens out — interpolated through `lookAt`, so
-the horizon never rolls and there is nothing to snap at the end. Fog and point
-size are calibrated against the resting station's distance to its aim, so the
-travelling camera reports that same quantity rather than a raw z that changes
-sign along the way.
+The camera is an offset from the resting station rather than a path to it:
+pressed forward and slightly raised while the field is loose, easing back as it
+lands. The aim never moves, so the horizon cannot roll and the last frame of the
+transformation is already the section's own composition.
 
-Reduced motion gets the same transformation, done inside the first
-`TRANSITION.reducedSpan` of the scroll and with the camera left at its resting
-station.
+Nothing is integrated: every term is a pure function of the particle's own
+randoms and the scroll position, so holding still holds the shape and scrolling
+back scatters it again along the same paths. Reduced motion gets the same
+transformation inside the first `TRANSITION.reducedSpan` of the scroll, with the
+camera left where it rests.
 
 ## Carrying the field between sections
 

@@ -407,113 +407,86 @@ vec3 terrainNormal(vec2 p, float t, float e) {
 
 
 
-/* ── The unravel ──────────────────────────────────────────────────────────
-   Where a particle is partway between the hero's vortex and its place on the
-   terrain.
+/* ── The gather ───────────────────────────────────────────────────────────
+   Where a particle is between the splash and its place on the terrain.
 
-   The whole thing is expressed in cylindrical coordinates around the summit's
-   axis, which is what makes it read as a vortex untwisting rather than a cloud
-   being pulled apart. A particle's angle on the column IS its bearing from the
-   peak on the finished terrain, plus the accumulated twist; unravelling is
-   literally that twist unwinding back to zero. Its height on the column comes
-   from its distance from the peak, so the summit's own particles sit at the
-   mouth and the far ground sits at the base — the correspondence is spatial, so
-   neighbours travel together as readable strands.
+   The scatter is defined in screen space, not in world space. A splash is
+   something that happens to the picture: spreading the field in scene units
+   piles the far half of it into the middle of the frame and leaves the corners
+   empty, whereas a disc in normalised device coordinates covers exactly what
+   the viewer can see, which is what "scattered across the whole screen" means.
 
-   Every term is a pure function of the particle's cell and the progress value,
-   with no accumulated state, so scrolling backwards retraces the same paths
-   exactly. */
-const UNRAVEL = `uniform float uTrans;      // 0 vortex, 1 terrain
+   So each particle starts at a point on that disc and travels to wherever its
+   terrain position happens to project, along a bowed path rather than a
+   straight one. Its depth travels too — from somewhere between much nearer and
+   much further than the landscape to the landscape's own — so the field has
+   size and haze variation on the way in instead of reading as flat confetti.
+
+   Every term is a pure function of the particle's own randoms and the progress
+   value, with no accumulated state, so scrolling back scatters it again along
+   the same paths. */
+const GATHER = `uniform float uTrans;      // 0 scattered, 1 landed
 uniform float uTransTime;
-uniform vec2  uAxis;       // the summit, in (x, z)
-uniform float uVScale;
-uniform float uVCenterY;
-uniform float uVTwist;
-uniform float uVSpin;
-uniform float uFieldR;
+uniform float uScatter;      // radius of the scatter disc, in ndc
+uniform float uScatterDepth; // how far depth is thrown either side
 uniform float uDelayLow;
 uniform float uDelayHigh;
 uniform float uSpan;
 uniform float uJitter;
 uniform float uSwirl;
 uniform float uBow;
-uniform float uArc;
+uniform float uDrift;
+uniform float uScatterFade;
 
-/* Column height for a particle, 0 at the base and 1 at the mouth. */
-float columnV(vec2 cell) {
-  return 1.0 - clamp(length(cell - uAxis) / uFieldR, 0.0, 1.0);
+/* How high this particle's destination sits, 0 at the lowest ground and 1 at
+   the summit. The low ground gathers first, so the landscape builds upward out
+   of the scatter rather than fading in all at once. */
+float landKey(float h) {
+  return clamp(h / 34.0, 0.0, 1.0);
 }
 
-/* How far along its journey this particle is. The base leaves first and becomes
-   the foreground; the mouth holds until last, so a peak stays standing while
-   everything under it spreads. */
-float settleOf(float v, float seed) {
-  float d = mix(uDelayLow, uDelayHigh, v) + (seed - 0.5) * uJitter;
+float settleOf(float key, float seed) {
+  float d = mix(uDelayLow, uDelayHigh, key) + (seed - 0.5) * uJitter;
   float s = clamp((uTrans - d) / max(uSpan, 1e-3), 0.0, 1.0);
   return s * s * (3.0 - 2.0 * s);
 }
 
-/* The hero's hourglass profile, in terrain units: a flared mouth above the
-   waist and a slower bloom below it. */
-float columnRadius(float v) {
-  float waist = 0.44;
-  float above = max(v - waist, 0.0);
-  float below = max(waist - v, 0.0);
-  return (0.5
-        + pow(above / (1.0 - waist), 2.3) * 2.75
-        + pow(below / waist, 2.0) * 1.155) * uVScale;
+/* A point on a disc that more than covers the frame — the corner of the unit
+   square is at 1.414, so anything beyond that spills off every edge. sqrt makes
+   the distribution even over the disc rather than crowding the centre. */
+vec2 scatterAt(vec3 r) {
+  float ang = r.x * 6.28318 + uTransTime * uDrift * (0.4 + r.z);
+  /* 0.72, not 0.5. Even area density reads as television static; weighting it
+     inward leaves the burst denser where it came from. */
+  float rad = pow(r.y, 0.72) * uScatter;
+  return vec2(cos(ang), sin(ang)) * rad;
 }
 
-vec3 unravel(vec2 cell, float h, float seed, out float settle) {
-  float v = columnV(cell);
-  float s = settleOf(v, seed);
+/* Blends the scattered position into the projected one. Returns the settle so
+   callers can cross-fade their shading with it. */
+vec2 gather(vec2 ndcEnd, vec3 r, float key, out float settle, out float depth) {
+  float s = settleOf(key, r.x);
   settle = s;
-  if (s > 0.999) return vec3(cell.x, h, cell.y);
+  depth = 1.0;
+  if (s > 0.999) return ndcEnd;
 
-  vec2 d = cell - uAxis;
-  float rT = length(d);
-  float th = atan(d.y, d.x);
-  float rV = columnRadius(v);
-  float yV = (v - 0.5) * 8.4 * uVScale + uVCenterY;
-  float above = max(v - 0.44, 0.0);
-  float twist = uVTwist * pow(above, 1.4) + uTransTime * uVSpin * (0.45 + v * 0.9);
-
-  /* Three easings, not one. The twist lets go first, the radius spreads through
-     the middle, and the height settles last — which is the difference between a
-     strand sweeping out and a point sliding along a line. */
-  float eTwist = 1.0 - pow(1.0 - s, 2.2);
-  float eRad   = s * s * (3.0 - 2.0 * s);
-  float eY     = pow(s, 1.35);
-
-  float ang = th + (twist + uSwirl * 6.28318 * (0.3 + v)) * (1.0 - eTwist);
-  float rad = mix(rV, rT, eRad);
+  vec2 from = scatterAt(r);
+  /* settleOf already eased this. Easing it a second time here made the first
+     third of the journey almost imperceptible, so the field looked like it was
+     hanging still and then hurrying. */
+  float e = s;
   float bell = sin(3.14159 * s);
-  rad *= 1.0 + uBow * bell * (0.35 + (1.0 - v));
-  float y = mix(yV, h, eY) + uArc * bell * (0.25 + v * 0.9);
 
-  /* Thickness. Every particle at a given height would otherwise sit at exactly
-     the profile radius — an infinitely thin shell, which stacks into a solid
-     white wall rather than the cloth the hero's funnel reads as. Deterministic,
-     so it reverses with everything else. */
-  float k = 1.0 - s;
-  rad *= 1.0 + (fract(seed * 17.31) - 0.5) * 0.55 * k;
-  vec3 pos = vec3(uAxis.x + cos(ang) * rad, y, uAxis.y + sin(ang) * rad);
-  pos += vec3(sin(seed * 61.7), sin(seed * 37.1 + 1.7), sin(seed * 91.3 + 3.4))
-       * uVScale * 0.3 * k;
-  return pos;
-}
-
-/* How concentrated a particle is relative to where it will end up. On the
-   column a quarter of a million points occupy a few units of radius, and
-   additive blending turns that into a solid white bar; this is the factor that
-   keeps the funnel reading as particles. */
-float concentration(vec3 world, vec2 cell) {
-  float rNow = length(world.xz - uAxis);
-  /* Floored well above zero: the summit's own particles end up close to the
-     axis, and without a floor they would count as unconcentrated while still
-     bunched on the column. */
-  float rEnd = max(length(cell - uAxis), 20.0);
-  return clamp(rNow / rEnd, 0.035, 1.0);
+  /* Bowed and swept, not straight. A field of points all sliding down their own
+     straight lines reads as a wipe; curving the approach and rotating it a
+     little about the destination makes it read as the field being drawn in. */
+  vec2 d = ndcEnd - from;
+  vec2 perp = vec2(-d.y, d.x);
+  float turn = uSwirl * (1.0 - e) * (0.5 + r.z);
+  vec2 sw = vec2(from.x * cos(turn) - from.y * sin(turn),
+                 from.x * sin(turn) + from.y * cos(turn));
+  depth = mix(mix(0.3, 2.3, r.z), 1.0, e);
+  return mix(sw, ndcEnd, e) + perp * uBow * bell * (0.3 + r.z * 0.8);
 }
 `;
 
@@ -572,7 +545,7 @@ uniform float uDebug;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
-${UNRAVEL}
+${GATHER}
 
 out float vShade;
 
@@ -642,7 +615,7 @@ uniform float uCamDist;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
-${UNRAVEL}
+${GATHER}
 
 out float vAlpha;
 
@@ -651,15 +624,17 @@ void main() {
   float crest;
   float h = terrainDetail(p, uTime, crest);
 
-  /* Partway through the transformation this is somewhere on the strand between
-     the column and the ground; at rest it is exactly the ground. */
-  float settle;
-  vec3 world = unravel(p, h, aRand.x, settle);
-
-  vec4 mv = modelViewMatrix * vec4(world, 1.0);
+  vec4 mv = modelViewMatrix * vec4(p.x, h, p.y, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
+
+  /* Partway through the transformation this is somewhere between the splash and
+     the landscape; at rest it is exactly the landscape. */
+  float settle, depth;
+  ndc = gather(ndc, aRand, landKey(h), settle, depth);
+  dist *= depth;
+
   ndc += pointerPush(ndc, clamp(uCamDist / dist, 0.3, 2.0));
   clip.xy = ndc * clip.w;
   gl_Position = clip;
@@ -696,11 +671,12 @@ void main() {
      on crests and again where the designed spines run. */
   float weight = mix(0.12, 0.8, aRand.x) * (0.42 + steep * 0.45 + ridge * uCrestGain);
   /* Shading crosses over with the shape. Terrain slope and ridge terms describe
-     ground; a particle still on the column is lit by where it sits on the
-     column instead, or the vortex arrives pre-painted with a landscape. */
-  float vtx = mix(0.3, 0.95, aRand.y) * (0.45 + columnV(p) * 0.75)
-            * concentration(world, p);
-  weight = mix(vtx, weight, settle);
+     ground; a particle still in the air has none, so it carries a flat weight
+     until it lands — otherwise the splash arrives pre-painted with a landscape.
+     The scattered field is also held well down: a quarter of a million points
+     spread over the frame is a grey wash at full strength. */
+  float loose = mix(0.25, 0.9, aRand.y) * uScatterFade;
+  weight = mix(loose, weight, settle);
   float lit = mix(1.0, terrainLight(nrm), settle);
   /* The copy is not on screen until the transformation is nearly over, so the
      guard that protects it stands down until then. */
@@ -750,7 +726,7 @@ uniform float uLineRev1;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
-${UNRAVEL}
+${GATHER}
 
 out float vAlpha;
 
@@ -759,13 +735,16 @@ void main() {
   float crest;
   float h = terrainLine(p, uTime, crest);
 
-  float settle;
-  vec3 world = unravel(p, h, aMeta.x, settle);
-
-  vec4 mv = modelViewMatrix * vec4(world, 1.0);
+  vec4 mv = modelViewMatrix * vec4(p.x, h, p.y, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
+
+  /* Lines do not scatter — they wait. A strip only reads as a line while its
+     vertices stay in order, and scattering each one independently turns it into
+     a tangle across the frame. So a line stays exactly on the ground it
+     describes and simply is not drawn until that ground has arrived. */
+  float settle = settleOf(landKey(h), fract(aMeta.x * 7.3));
   ndc += pointerPush(ndc, clamp(uCamDist / dist, 0.3, 1.5));
   clip.xy = ndc * clip.w;
   gl_Position = clip;
@@ -842,7 +821,7 @@ uniform float uPointSize;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
-${UNRAVEL}
+${GATHER}
 
 out float vAlpha;
 
@@ -851,13 +830,17 @@ void main() {
   float crest;
   float h = terrainBase(p, uTime, crest);
 
-  float settle;
-  vec3 world = unravel(p, h, fract(aMeta.x * 13.7), settle);
-
-  vec4 mv = modelViewMatrix * vec4(world, 1.0);
+  vec4 mv = modelViewMatrix * vec4(p.x, h, p.y, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
+
+  float settle, depth;
+  ndc = gather(ndc, vec3(fract(aMeta.x * 13.7 + aMeta.y * 29.3),
+                        fract(aMeta.x * 31.3 + aMeta.y * 7.7),
+                        fract(aMeta.x * 53.9 + aMeta.y * 17.1)),
+               landKey(h), settle, depth);
+  dist *= depth;
   ndc += pointerPush(ndc, clamp(uCamDist / dist, 0.3, 1.5));
   clip.xy = ndc * clip.w;
   gl_Position = clip;
@@ -876,7 +859,7 @@ void main() {
 
   /* Beads ride the same curves as the lines, so they travel with the strand
      and appear as it lands. */
-  float dotIn = mix(0.45, 1.0, settle) * mix(concentration(world, p), 1.0, settle);
+  float dotIn = mix(uScatterFade, 1.0, settle);
   float guard = mix(1.0, copyGuard(ndc), smoothstep(0.75, 1.0, uTrans));
   vAlpha = fog * drawn * breaks * dotIn * (0.35 + steep * 0.6 + ridge * 0.6)
          * mix(1.0, terrainLight(nrm), settle)
@@ -905,7 +888,7 @@ uniform float uDriftHeight;
 ${SIMPLEX_3D}
 ${terrain}
 ${POINTER}
-${UNRAVEL}
+${GATHER}
 
 out float vAlpha;
 
@@ -915,20 +898,21 @@ void main() {
   float h = terrainBase(p, uTime, crest);
   h += (0.25 + aRand.z * 0.75) * uDriftHeight + sin(uTime * 1.7 + aRand.x * 31.4) * 0.5;
 
-  float settle;
-  vec3 world = unravel(p, h, aRand.y, settle);
-
-  vec4 mv = modelViewMatrix * vec4(world, 1.0);
+  vec4 mv = modelViewMatrix * vec4(p.x, h, p.y, 1.0);
   vec4 clip = projectionMatrix * mv;
   vec2 ndc = clip.xy / clip.w;
   float dist = max(-mv.z, 0.1);
+
+  float settle, depth;
+  ndc = gather(ndc, aRand.yzx, landKey(h), settle, depth);
+  dist *= depth;
   ndc += pointerPush(ndc, clamp(uCamDist / dist, 0.3, 2.0));
   clip.xy = ndc * clip.w;
   gl_Position = clip;
 
   gl_PointSize = clamp(1.5 * uDpr * (0.6 + aRand.z * 0.6) * (uCamDist * 1.3 / dist), 0.5, 2.0);
   float fog = 1.0 - smoothstep(uCamDist * 1.3, uCamDist * 3.6, dist);
-  vAlpha = uReveal * fog * (0.2 + aRand.x * 0.8) * concentration(world, p) * copyGuard(ndc);
+  vAlpha = uReveal * fog * (0.2 + aRand.x * 0.8) * mix(uScatterFade, 1.0, settle) * copyGuard(ndc);
 }
 `;
 
@@ -1105,19 +1089,19 @@ export default function ParticleMountain({
     const transUniforms = {
       uTrans: { value: progressSource ? 0 : 1 },
       uTransTime: { value: 0 },
-      uAxis: { value: new Float32Array([C.masses[0].x, C.masses[0].z]) },
-      uVScale: { value: T.vortexScale },
-      uVCenterY: { value: T.vortexCenterY },
-      uVTwist: { value: T.vortexTwist },
-      uVSpin: { value: T.vortexSpin },
-      uFieldR: { value: T.fieldRadius },
+      /* A narrow frame runs far fewer particles but the scatter still has to
+         cover the whole of it, so the burst thins out into a starfield. Tighter
+         disc, brighter grains. */
+      uScatter: { value: narrow ? T.scatter * 0.82 : T.scatter },
+      uScatterDepth: { value: T.scatterDepth },
+      uScatterFade: { value: T.scatterFade * (narrow ? 1.7 : 1) },
+      uDrift: { value: T.drift },
       uDelayLow: { value: T.delayLow },
       uDelayHigh: { value: T.delayHigh },
       uSpan: { value: T.travelSpan },
       uJitter: { value: T.jitter },
-      uSwirl: { value: T.swirlTurns },
+      uSwirl: { value: T.swirl },
       uBow: { value: T.bow },
-      uArc: { value: T.arc },
     };
     const pointerUniforms = {
       uMouse: { value: new Float32Array([0, -2]) },
@@ -1472,9 +1456,6 @@ export default function ParticleMountain({
     let transClock = 0;
     let reveal = 0;
     let camDist = C.camZ;
-    /* Distance from the resting station to its aim, the yardstick the travelling
-       camera reports its own distance against. */
-    const restSpan = Math.hypot(C.camY - C.aimY, C.camZ - C.aimZ) || 1;
     let last = performance.now();
 
     const loop = (t: number) => {
@@ -1529,25 +1510,15 @@ export default function ParticleMountain({
       const restAimY = C.aimY + mouse[1] * par * 0.6;
 
       if (progressSource && !reduceMotion && tr < 1) {
-        /* One continuous path. A short press toward the column while it is
-           still recognisable, then a long pull back as the landscape opens out
-           — and the aim eases across with it, so the horizon never rolls and
-           there is nothing to snap at the end. */
-        const e = smoothstep(T.camRange[0], T.camRange[1], tr);
-        const push = Math.sin(Math.min(tr / T.camRange[0], 1) * Math.PI) * T.camPush;
-        const cx = T.camStart[0] + (restX - T.camStart[0]) * e;
-        const cy = T.camStart[1] + (restY - T.camStart[1]) * e;
-        const cz = T.camStart[2] + (restZ - T.camStart[2]) * e - push * (1 - e);
-        const ax = T.aimStart[0] + (aimX - T.aimStart[0]) * e;
-        const ay = T.aimStart[1] + (restAimY - T.aimStart[1]) * e;
-        const az = T.aimStart[2] + (C.aimZ - T.aimStart[2]) * e;
-        camera.position.set(cx, cy, cz);
-        camera.lookAt([ax, ay, az]);
-        /* Fog and point size are calibrated against the resting station's
-           distance to its aim, so the travelling camera has to report the same
-           quantity rather than a raw z that changes sign along the way. */
-        const dx = cx - ax, dy = cy - ay, dz = cz - az;
-        camDist = (Math.sqrt(dx * dx + dy * dy + dz * dz) / restSpan) * C.camZ;
+        /* An offset from the resting station, not a path to it: pressed forward
+           and slightly raised while the field is still loose, easing back as it
+           lands. The aim is the resting one throughout, so the horizon cannot
+           roll and the last frame of the transformation is already the section's
+           own composition. */
+        const back = 1 - smoothstep(T.camRange[0], T.camRange[1], tr);
+        camera.position.set(restX, restY + T.camLift * back, restZ - T.camPush * back);
+        camera.lookAt([aimX, restAimY, C.aimZ]);
+        camDist = restZ - T.camPush * back;
       } else {
         camera.position.set(restX, restY, restZ);
         camera.lookAt([aimX, restAimY, C.aimZ]);
