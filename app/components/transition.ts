@@ -16,13 +16,18 @@
  */
 
 export const TRANSITION = {
-  /** Viewports of scroll the transformation occupies. */
-  scrollVh: 2.1,
+  /** Viewports of scroll the transformation occupies.
+   *
+   *  Roughly one screen. The stage is pinned for exactly this long, and a pin
+   *  is a stall: the page stops moving while the transformation runs. Two
+   *  viewports of that reads as the scroll having jammed between two sections
+   *  rather than as one section becoming the next. */
+  scrollVh: 1.0,
   /** Viewports of the hero's own tail that the transformation reaches back
    *  into. The handover has to happen while the hero is still on screen: park
    *  it after the hero and the reader gets a second full-screen vortex, framed
    *  and captionless, which reads as the hero all over again. */
-  leadVh: 0.45,
+  leadVh: 0.35,
   /** Where inside that lead the field changes hands — late enough that the
    *  pinned stage is almost in place, early enough that the hero's copy is
    *  still leaving. */

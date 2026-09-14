@@ -263,7 +263,10 @@ off-screen.
 
 The vortex does not cross-fade into the mountain; it unravels into it. Between
 the two resting states sits `TRANSITION.scrollVh` viewports of scroll with the
-stage pinned, and every knob for the choreography lives in one object in
+stage pinned — about one screen. A pin is a stall: the page stops moving while
+the transformation runs, and two viewports of that reads as the scroll having
+jammed between two sections rather than as one section becoming the next. Every
+knob for the choreography lives in one object in
 `components/transition.ts` — scroll length, phase timings, spread, unravelling
 strength, path curvature, camera path, line reveal and text fades — because the
 sequence is split across three places that all have to agree.
