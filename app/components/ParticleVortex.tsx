@@ -1014,14 +1014,34 @@ export default function ParticleVortex({
     let last = performance.now();
     let morphNow = 0;
     let lastTarget: number | null = null;
+    /* An empty scene, so the canvas can be cleared without drawing the field. */
+    const empty = new Transform();
+    let blanked = false;
     // Reduced motion still gets a still frame plus pointer response, never drift.
     let clock = reduceMotion ? 6 : 0;
 
     const render = () => {
+      /* Once the field has handed over it is invisible for the rest of the
+         page, but it stays mounted — it has to come back for the dunes. Drawing
+         a hundred thousand points at zero alpha the whole way down is a second
+         GPU load running underneath whatever owns the screen. One clear, then
+         nothing, until it has something to show again. */
+      const fieldOn = (pointProgram.uniforms.uOpacity.value as number) > 0.002;
+      const linesOn = (lineProgram.uniforms.uOpacity.value as number) > 0.002;
+      const ringOn = (ringProgram.uniforms.uMorph.value as number) > 0.001;
+      if (!fieldOn && !linesOn && !ringOn) {
+        if (!blanked) {
+          renderer.render({ scene: empty, camera });
+          blanked = true;
+        }
+        return;
+      }
+      blanked = false;
+
       renderer.render({ scene, camera });
       // Drawn after the scene so the ring sits over the field, and separately
       // from it because its geometry is in clip space, not world space.
-      if ((ringProgram.uniforms.uMorph.value as number) > 0.001) {
+      if (ringOn) {
         // clear:false — a second render would otherwise wipe the field that
         // was just drawn. No camera: the ring's geometry is already clip-space.
         renderer.render({ scene: ring, clear: false, sort: false, frustumCull: false });

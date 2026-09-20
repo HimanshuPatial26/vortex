@@ -176,8 +176,8 @@ export default function Page() {
           >
             The range is designed, not discovered: a table of mountain masses
             and ridge paths that the shader evaluates directly, with erosion
-            carved into it by ridged noise. A quarter of a million points and
-            nine hundred draped lines read the same surface, and an invisible
+            carved into it by ridged noise. Some two hundred thousand points
+            and six hundred draped lines read the same surface, and an invisible
             copy of it writes depth so the far side never shows through.
           </p>
         </div>
