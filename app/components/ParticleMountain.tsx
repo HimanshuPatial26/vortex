@@ -60,8 +60,8 @@ export const MOUNTAIN = {
      fraction of uniform. A power curve would do the same job but its derivative
      goes to zero at the origin, which stacks a whole column of the lattice onto
      x = 0 and leaves a bright seam up the middle of the frame. */
-  cols: 680,
-  rows: 400,
+  cols: 540,
+  rows: 320,
   packX: 0.45,
   packZ: 0.75,
 
@@ -141,8 +141,8 @@ export const MOUNTAIN = {
   fgBack: -34,
 
   /* ── Depth occluder ─────────────────────────────────────────────────────── */
-  occluderCols: 330,
-  occluderRows: 200,
+  occluderCols: 270,
+  occluderRows: 160,
   /** How far the invisible surface sits below the drawn one. Must clear the
       finest octave, or points in crevices get eaten by their own ground. */
   occluderDrop: 1.35,
@@ -155,18 +155,18 @@ export const MOUNTAIN = {
   crestGain: 1.1,
 
   /* ── Draped paths ───────────────────────────────────────────────────────── */
-  pathCount: 900,
-  pathRes: 340,
+  pathCount: 620,
+  pathRes: 210,
   pathOpacity: 0.36,
   /** Depth wander, as a fraction of the local gap between paths. */
   pathWarp: 1.15,
   /** Dotted samples along the paths. */
-  pathDotStride: 1,
-  pathDotKeep: 0.45,
+  pathDotStride: 2,
+  pathDotKeep: 0.34,
   pathDotOpacity: 0.75,
 
   /* ── Drift and haze ─────────────────────────────────────────────────────── */
-  driftCount: 1800,
+  driftCount: 1200,
   driftHeight: 6.5,
   driftOpacity: 0.32,
   hazeCount: 260,
@@ -188,7 +188,10 @@ export const MOUNTAIN = {
   pointerForce: 0.055,
 
   /* ── Quality ────────────────────────────────────────────────────────────── */
-  maxDpr: 2,
+  maxDpr: 1.75,
+  /** Floor the quality guard will not thin past. Below this the range starts
+   *  to look sparse rather than merely lighter. */
+  minQuality: 0.45,
 };
 
 export type MountainConfig = typeof MOUNTAIN;
@@ -376,10 +379,13 @@ float terrainCoarse(vec2 p, float t) {
   float cr;
   float sk = skeleton(p, cr);
   vec2 n = p * uNoiseScale;
-  vec2 wn = n + vec2(snoise(vec3(n * 0.82 + 5.1, 0.0)), snoise(vec3(n * 0.82 + 19.7, 0.0))) * uWarp;
+  /* One warp sample serving both axes, and one ridged octave. This is read
+     three times per point to build a normal, so every sample here costs triple
+     — and a shading term does not need the detail a silhouette does. */
+  float w = snoise(vec3(n * 0.82 + 5.1, 0.0));
+  vec2 wn = n + vec2(w, -w * 0.78 + 0.31) * uWarp;
   float r0 = 1.0 - abs(snoise(vec3(wn, 0.0)));
-  float r1 = 1.0 - abs(snoise(vec3(wn * 2.11 + 5.0, 0.0)));
-  float rg = r0 * r0 * 0.64 + r1 * r1 * 0.36;
+  float rg = r0 * r0;
   float local = clamp(sk / 30.0, 0.0, 1.0);
   float h = sk - (1.0 - rg) * uAmpRidge * (uDetailFloor + local);
   float near = smoothstep(uFgBack, uFgFront, p.y) * smoothstep(uNearZ + 1.0, uNearZ - 14.0, p.y);
@@ -395,6 +401,24 @@ float terrainLight(vec3 nrm) {
   // Bent rather than linear: the gentle foreground swells sit in a narrow band
   // of this term, and a straight ramp leaves them all the same grey.
   return 0.13 + 0.87 * pow(d, 1.4);
+}
+
+/* A normal taken from the designed skeleton alone — masses and ridges, pure
+   arithmetic, not one noise sample. The lines and the beads use it instead of
+   the real one.
+
+   A surface normal costs three height samples, and on the full field that is
+   fifteen noise evaluations for a hairline's shading. Across six hundred
+   thousand line vertices it worked out at a third of everything the scene did
+   per frame, spent on the tonal variation of strokes a pixel wide. The skeleton
+   carries the broad form the shading actually reads, so this keeps the light on
+   the lines and gives the frame budget back. */
+vec3 skeletonNormal(vec2 p, float e) {
+  float c;
+  float h = skeleton(p, c);
+  float hx = skeleton(p + vec2(e, 0.0), c);
+  float hz = skeleton(p + vec2(0.0, e), c);
+  return normalize(vec3((h - hx) / e, 1.0, (h - hz) / e));
 }
 
 vec3 terrainNormal(vec2 p, float t, float e) {
@@ -749,8 +773,8 @@ void main() {
   clip.xy = ndc * clip.w;
   gl_Position = clip;
 
-  vec3 nrm = terrainNormal(p, uTime, 1.3);
-  float steep = smoothstep(0.012, 0.24, clamp(1.0 - nrm.y, 0.0, 1.0));
+  vec3 nrm = skeletonNormal(p, 1.6);
+  float steep = smoothstep(0.004, 0.12, clamp(1.0 - nrm.y, 0.0, 1.0));
   float ridge = smoothstep(0.2, 0.95, crest);
 
   float seed = aMeta.x;
@@ -848,8 +872,8 @@ void main() {
   float seed = aMeta.x;
   gl_PointSize = clamp(uPointSize * uDpr * (0.6 + fract(seed * 91.7) * 0.7) * (uCamDist * 1.35 / dist), 0.5, 2.6);
 
-  vec3 nrm = terrainNormal(p, uTime, 1.3);
-  float steep = smoothstep(0.012, 0.24, clamp(1.0 - nrm.y, 0.0, 1.0));
+  vec3 nrm = skeletonNormal(p, 1.6);
+  float steep = smoothstep(0.004, 0.12, clamp(1.0 - nrm.y, 0.0, 1.0));
   float ridge = smoothstep(0.2, 0.95, crest);
   float fog = (1.0 - smoothstep(uCamDist * 1.4, uCamDist * 4.0, dist))
             * smoothstep(uCamDist * 0.16, uCamDist * 0.62, dist);
@@ -1161,8 +1185,22 @@ export default function ParticleMountain({
       },
     });
     pointProgram.setBlendFunc(gl.ONE, gl.ONE);
+    /* Shuffled, so that drawing only the first N of them thins the whole field
+       evenly instead of lopping off the back of the terrain. That is what lets
+       the quality guard below trade density for frame rate without the
+       composition changing shape. */
+    for (let i = count - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      for (let k = 0; k < 2; k++) {
+        const t = cell[i * 2 + k]; cell[i * 2 + k] = cell[j * 2 + k]; cell[j * 2 + k] = t;
+      }
+      for (let k = 0; k < 3; k++) {
+        const t = rand[i * 3 + k]; rand[i * 3 + k] = rand[j * 3 + k]; rand[j * 3 + k] = t;
+      }
+    }
+    const pointGeometry = new Geometry(gl, { aCell: { size: 2, data: cell }, aRand: { size: 3, data: rand } });
     new Mesh(gl, {
-      geometry: new Geometry(gl, { aCell: { size: 2, data: cell }, aRand: { size: 3, data: rand } }),
+      geometry: pointGeometry,
       program: pointProgram,
       mode: gl.POINTS,
     }).setParent(scene);
@@ -1253,7 +1291,14 @@ export default function ParticleMountain({
     const pathMeta = new Float32Array(segTotal * 2 * 2);
     let pw = 0;
     let pm = 0;
-    for (let k = 0; k < pathCount; k++) {
+    /* Interleaved the same way: truncating the draw range has to drop paths
+       spread through the depth range, not the far half of them. */
+    const pathOrder = Array.from({ length: pathCount }, (_, i) => i);
+    for (let i = pathCount - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [pathOrder[i], pathOrder[j]] = [pathOrder[j], pathOrder[i]];
+    }
+    for (const k of pathOrder) {
       const pts = pathPts[k];
       const seed = pathSeeds[k];
       for (let i = 0; i < pathRes; i++) {
@@ -1285,14 +1330,11 @@ export default function ParticleMountain({
       },
     });
     pathProgram.setBlendFunc(gl.ONE, gl.ONE);
-    new Mesh(gl, {
-      geometry: new Geometry(gl, {
-        aCell: { size: 2, data: pathCell },
-        aMeta: { size: 2, data: pathMeta },
-      }),
-      program: pathProgram,
-      mode: gl.LINES,
-    }).setParent(scene);
+    const pathGeometry = new Geometry(gl, {
+      aCell: { size: 2, data: pathCell },
+      aMeta: { size: 2, data: pathMeta },
+    });
+    new Mesh(gl, { geometry: pathGeometry, program: pathProgram, mode: gl.LINES }).setParent(scene);
 
     /* Dotted samples along the same curves. Irregular by construction — a
        coin flip per sample, not a fixed stride, or the beading reads as a
@@ -1456,11 +1498,41 @@ export default function ParticleMountain({
     let transClock = 0;
     let reveal = 0;
     let camDist = C.camZ;
+
+    /* Quality guard. Every number in this file was chosen by looking at stills
+       from a software renderer, which says nothing about what a real machine
+       does with half a million vertices a frame. Rather than guess a budget
+       that suits every GPU, measure the frame and give density back until the
+       frame fits.
+
+       It only ever thins — the composition, the camera and the silhouette are
+       untouched — and it moves slowly enough not to be visible as popping. */
+    const fullPoints = count;
+    const fullPathVerts = segTotal * 2;
+    const vertsPerPath = pathRes * 2;
+    let quality = 1;
+    let frameAvg = 16.7;
+    let lastQualityAt = 0;
     let last = performance.now();
 
     const loop = (t: number) => {
-      const dt = Math.min((t - last) / 1000, 0.1);
+      const raw_dt = t - last;
+      const dt = Math.min(raw_dt / 1000, 0.1);
       last = t;
+
+      /* A long exponential average, so one stalled frame — a tab regaining
+         focus, a garbage collection — cannot drag the quality down. */
+      if (raw_dt > 0 && raw_dt < 500) frameAvg += (raw_dt - frameAvg) * 0.05;
+      if (t - lastQualityAt > 500) {
+        lastQualityAt = t;
+        // Below ~45fps give density back; comfortably above 60 take it again.
+        if (frameAvg > 22 && quality > C.minQuality) quality = Math.max(C.minQuality, quality - 0.12);
+        else if (frameAvg < 14 && quality < 1) quality = Math.min(1, quality + 0.06);
+        pointGeometry.setDrawRange(0, Math.round(fullPoints * quality));
+        // Whole paths only: half a path is a line that stops in mid air.
+        const paths = Math.max(1, Math.round((fullPathVerts * quality) / vertsPerPath));
+        pathGeometry.setDrawRange(0, Math.min(fullPathVerts, paths * vertsPerPath));
+      }
       if (!reduceMotion) clock += dt * C.idleSpeed;
 
       /* Progress through the transformation. Read straight from scroll, never
@@ -1568,6 +1640,16 @@ export default function ParticleMountain({
       renderer.setDepthMask(true);
       gl.colorMask(true, true, true, true);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      /* Nothing to draw. The hero owns the screen for the whole first section
+         and this field is still mounted underneath it, so without this it spends
+         half a million vertices a frame rendering something with zero alpha —
+         while the hero's own canvas is doing its work in parallel. The clear
+         above has already blanked the canvas, so leaving now is correct. */
+      if (reveal * opacity <= 0.001 && !debugSurface) {
+        raf = requestAnimationFrame(loop);
+        return;
+      }
       if (!debugSurface) {
         gl.colorMask(false, false, false, false);
         renderer.render({ scene: occluderScene, camera, clear: false, sort: false, frustumCull: false });
