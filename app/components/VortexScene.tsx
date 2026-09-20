@@ -12,7 +12,7 @@
    alike. */
 
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAdvanceScroll } from "./useAdvanceScroll";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -32,8 +32,16 @@ export interface VortexSceneProps {
    *  morph axis: the field takes its next form as that section fills the
    *  screen, and a click advances to whichever comes next. */
   sections?: string[];
-  /** Fraction of a viewport of scrolling per morph stage. */
+  /** Fraction of a viewport of scrolling per morph stage. Used only when a
+   *  section id cannot be measured. */
   morphSpan?: number;
+  /** Where a click advances to, if that is not the morph stops themselves. */
+  advanceTo?: string[];
+  /** Morph positions that scatter the field as the page passes them. Defaults
+   *  to one just past each stage boundary. */
+  splashAt?: number[];
+  /** Progress through the hero's release, read once per frame. */
+  releaseSource?: () => number;
   /** Milliseconds a click-advance scroll takes. */
   advanceDuration?: number;
   /** Runs alongside the advance when the field is clicked. */
@@ -59,6 +67,9 @@ export default function VortexScene({
   lineColor = "#C8CEDE",
   sections = [],
   morphSpan = 1,
+  advanceTo,
+  splashAt: splashAtProp,
+  releaseSource,
   advanceDuration = 1100,
   onSplash,
   background = "#06070C",
@@ -72,27 +83,73 @@ export default function VortexScene({
   /* Read once per frame by the render loop rather than pushed in as a prop from
      a scroll listener — a React render per scroll event would cost far more
      than the field itself. */
+  /* Where each stop sits in the document. Measured from the stops themselves
+     rather than assuming one viewport each — a section that owns a scroll-driven
+     transformation is several viewports tall, and a fixed span would run the
+     morph off the end of it long before the reader got there.
+
+     Cached, because these only move when the page is laid out again: reading
+     them per frame means a forced layout per stop on every frame of every
+     scroll, which is pure waste for numbers that did not change. */
+  const stopsRef = useRef<number[] | null>(null);
+  useEffect(() => {
+    const measure = () => {
+      const y = window.scrollY;
+      stopsRef.current = sections.map((id, i) => {
+        const el = document.getElementById(id);
+        return el
+          ? el.getBoundingClientRect().top + y
+          : window.innerHeight * morphSpan * (i + 1);
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    /* Section heights are in svh, so they also change when a mobile browser's
+       toolbars slide away — which fires no resize event on some engines. */
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.documentElement);
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro.disconnect();
+    };
+  }, [sections, morphSpan]);
+
   const morphSource = useCallback(() => {
-    const span = Math.max(window.innerHeight * morphSpan, 1);
-    return Math.max(0, Math.min(sections.length, window.scrollY / span));
-  }, [morphSpan, sections.length]);
+    const stops = stopsRef.current;
+    if (!stops) return 0;
+    const y = window.scrollY;
+    let prev = 0;
+    for (let i = 0; i < stops.length; i++) {
+      if (y < stops[i]) return i + (y - prev) / Math.max(stops[i] - prev, 1);
+      prev = stops[i];
+    }
+    return stops.length;
+  }, []);
 
   /* One just past every boundary, so a plain scroll scatters the field at each
      handover exactly as a click does. A click's own splash suppresses the one
      its scroll would otherwise trigger, so they never double up. */
   const splashAt = useMemo(
-    () => sections.map((_, i) => i + 0.22),
-    [sections],
+    () => splashAtProp ?? sections.map((_, i) => i + 0.22),
+    [splashAtProp, sections],
   );
 
   // A click advances to whichever section comes next from where the page is.
   const handleSplash = useCallback(() => {
     onSplash?.();
-    if (!sections.length) return;
-    const here = Math.round(window.scrollY / Math.max(window.innerHeight, 1));
-    const id = sections[Math.min(here, sections.length - 1)];
+    const stops = advanceTo ?? sections;
+    if (!stops.length) return;
+    /* The first stop that is still meaningfully below the fold. Rounding
+       scrollY into viewports picked the wrong one as soon as a section stopped
+       being one viewport tall — which is how a click from the hero landed at
+       the start of the transformation instead of at the landscape. */
+    const id =
+      stops.find((s) => {
+        const el = document.getElementById(s);
+        return el && el.getBoundingClientRect().top > window.innerHeight * 0.3;
+      }) ?? stops[stops.length - 1];
     if (id) scrollTo(id);
-  }, [onSplash, sections, scrollTo]);
+  }, [onSplash, sections, advanceTo, scrollTo]);
 
   return (
     <div ref={hostRef} style={{ position: "relative", background, ...style }}>
@@ -121,6 +178,7 @@ export default function VortexScene({
             splashOnClick
             onSplash={handleSplash}
             morphSource={morphSource}
+            releaseSource={releaseSource}
             splashAt={splashAt}
             travelDepth={travelDepth}
             yieldRange={yieldRange}
