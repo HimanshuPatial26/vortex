@@ -60,3 +60,227 @@ body { margin: 0; background: #06070C; }
   }
   .pm-hud-peak svg { display: none !important; }
 }
+
+/* ── AboutJourney ─────────────────────────────────────────────────────────
+   Layout is here rather than inline because it changes at the breakpoint: an
+   inline style would outrank the media query. Anything positioned per frame
+   (markers, cards, the figure) gets its transform from script and nothing
+   here sets one, so the two never fight. */
+.aj {
+  position: relative;
+  min-height: max(100svh, 640px);
+  background: var(--aj-ink);
+  color: var(--aj-text);
+  overflow: hidden;
+  isolation: isolate;
+}
+.aj-stage { position: absolute; inset: 0; }
+.aj-canvas { position: absolute; inset: 0; }
+.aj-glow {
+  position: absolute; left: 0; top: 0;
+  width: 56vw; height: 34vw;
+  border-radius: 50%;
+  /* Several stops, falling off slowly: a two-stop gradient shows its edge as
+     a faint disc against a background this dark. */
+  /* A small hot core under the figure, then a long, slow falloff. Several
+     stops: a two-stop gradient shows its edge as a faint disc against a
+     background this dark. */
+  background: radial-gradient(closest-side,
+    rgba(238, 243, 255, 0.55), rgba(215, 226, 255, 0.22) 7%,
+    rgba(195, 208, 245, 0.09) 24%, rgba(165, 184, 232, 0.035) 50%,
+    rgba(160, 180, 230, 0.01) 78%, transparent);
+  filter: blur(14px);
+  opacity: 0;
+  pointer-events: none;
+}
+.aj-overlay { position: absolute; inset: 0; pointer-events: none; }
+.aj-figure { position: absolute; left: 0; top: 0; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6)); }
+.aj-shadow {
+  position: absolute; left: 0; top: 0;
+  transform-origin: 0 50%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.7), transparent);
+}
+
+.aj-marker {
+  position: absolute; left: 0; top: 0;
+  width: 0; height: 0; padding: 0; border: 0;
+  background: none; color: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 0.8s ease 0.6s;
+}
+.aj-in .aj-marker { opacity: 1; }
+/* The button itself is a zero-size anchor; this gives it a finger-sized hit area. */
+.aj-marker::before {
+  content: "";
+  position: absolute; left: -18px; top: -18px;
+  width: 36px; height: 36px; border-radius: 50%;
+}
+.aj-dot {
+  position: absolute; left: -5px; top: -5px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+  transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.3s ease;
+}
+.aj-marker:hover .aj-dot { transform: scale(1.3); }
+.aj-marker.is-active .aj-dot {
+  background: #c4dcff;
+  box-shadow: 0 0 0 3px rgba(143, 180, 255, 0.22), 0 0 18px 6px rgba(120, 170, 255, 0.5);
+}
+.aj-leader {
+  position: absolute; left: -0.75px; bottom: 0;
+  width: 1.5px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.aj-label {
+  position: absolute; left: -7px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: rgba(4, 5, 8, 0.5);
+  font: 600 11px/1.2 var(--aj-mono);
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  color: #fff;
+  transition: opacity 0.3s ease;
+}
+.aj-marker.is-active .aj-label { opacity: 0; }
+.aj-marker:focus-visible { outline: none; }
+.aj-marker:focus-visible .aj-dot { outline: 1.5px solid var(--aj-accent); outline-offset: 4px; }
+.aj-marker:focus-visible .aj-label { outline: 1.5px solid var(--aj-accent); outline-offset: 2px; }
+
+.aj-card {
+  width: 296px;
+  box-sizing: border-box;
+  padding: 15px 18px 16px;
+  background: rgba(9, 11, 15, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.aj-card-float {
+  position: absolute; left: 0; top: 0;
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0s linear 0.3s;
+}
+.aj-in .aj-card-float.is-active {
+  opacity: 1; visibility: visible;
+  transition: opacity 0.45s ease 0.15s;
+}
+.aj-card-kicker {
+  font: 500 10.5px/1.2 var(--aj-mono);
+  letter-spacing: 0.16em;
+  color: #9fc4ff;
+  margin-bottom: 10px;
+}
+.aj-card-title {
+  font-family: var(--aj-display);
+  font-size: 23px; line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.aj-card-body {
+  margin-top: 7px;
+  font: 13px/1.5 var(--aj-body);
+  color: var(--aj-muted);
+}
+
+.aj-intro {
+  position: absolute;
+  left: clamp(20px, 4.3vw, 80px);
+  top: clamp(40px, 6.6vh, 76px);
+  max-width: min(37vw, 660px);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.9s ease, transform 0.9s ease;
+}
+.aj-in .aj-intro { opacity: 1; transform: none; }
+.aj-kicker {
+  font: 400 clamp(11px, 0.92vw, 15px)/1.2 var(--aj-mono);
+  letter-spacing: 0.34em;
+  color: rgba(232, 234, 242, 0.74);
+  margin-bottom: clamp(18px, 3.2vh, 34px);
+}
+.aj-title {
+  margin: 0;
+  font-family: var(--aj-display);
+  font-weight: 400;
+  font-size: clamp(44px, 5.5vw, 100px);
+  line-height: 0.98;
+  letter-spacing: -0.015em;
+  color: #fff;
+}
+.aj-body {
+  margin: clamp(20px, 3.4vh, 36px) 0 0;
+  font-family: var(--aj-body);
+  font-size: clamp(15px, 1.25vw, 21px);
+  line-height: 1.5;
+  color: var(--aj-muted);
+}
+.aj-hint {
+  position: absolute;
+  left: clamp(20px, 4.2vw, 74px);
+  bottom: clamp(26px, 5vh, 48px);
+  font: 400 10.5px/1.2 var(--aj-mono);
+  letter-spacing: 0.22em;
+  color: rgba(232, 234, 242, 0.7);
+}
+
+/* On desktop the static card is the live region for assistive tech and is
+   visually hidden — the floating card is the one people see. The tabs are
+   the narrow-screen controls; on desktop the markers are the controls. */
+.aj-below {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.aj-tabs { display: none; }
+
+/* No WebGL: keep the copy and the markers over a still glow. */
+.aj-nogl .aj-stage {
+  background:
+    radial-gradient(22% 14% at 50% 58%, rgba(225, 232, 255, 0.28), transparent 70%),
+    radial-gradient(70% 30% at 70% 60%, rgba(200, 210, 240, 0.08), transparent 70%);
+}
+.aj-nogl .aj-figure, .aj-nogl .aj-shadow, .aj-nogl .aj-glow { display: none; }
+
+@media (max-width: 819px) {
+  .aj { display: flex; flex-direction: column; min-height: auto; padding-bottom: 36px; }
+  .aj-intro { position: relative; left: auto; top: auto; order: 0; max-width: none; padding: 56px 20px 12px; }
+  .aj-title { font-size: clamp(38px, 11vw, 56px); }
+  .aj-stage { position: relative; order: 1; height: 62svh; min-height: 380px; }
+  .aj-card-float { display: none; }
+  .aj-marker.is-active .aj-label { opacity: 1; }
+  /* The tabs below carry the names; on the scene a number is enough and
+     never runs off the edge. */
+  .aj-label-name { display: none; }
+  .aj-below {
+    position: relative; order: 2;
+    width: auto; height: auto; overflow: visible; clip: auto; white-space: normal;
+    padding: 10px 20px 0;
+  }
+  .aj-card-static { width: 100%; }
+  .aj-tabs { display: flex; gap: 8px; margin-top: 12px; }
+  .aj-tab {
+    flex: 1 1 0; min-width: 0;
+    font: 500 10px/1.3 var(--aj-mono);
+    letter-spacing: 0.08em;
+    color: rgba(232, 234, 242, 0.8);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    padding: 10px 6px;
+  }
+  .aj-tab span { color: rgba(232, 234, 242, 0.5); }
+  .aj-tab.is-active { color: #fff; border-color: rgba(143, 180, 255, 0.7); background: rgba(143, 180, 255, 0.1); }
+  .aj-tab:focus-visible { outline: 1.5px solid var(--aj-accent); outline-offset: 2px; }
+  .aj-hint { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aj-intro { transform: none; }
+}

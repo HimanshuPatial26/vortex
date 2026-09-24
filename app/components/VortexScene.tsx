@@ -42,6 +42,10 @@ export interface VortexSceneProps {
   splashAt?: number[];
   /** Progress through the hero's release, read once per frame. */
   releaseSource?: () => number;
+  /** id of an opaque section that takes over the screen. The field fades out
+   *  as it arrives and stops drawing once it has — it is behind a solid
+   *  background at that point, so any work it did would be invisible. */
+  coverFrom?: string;
   /** Milliseconds a click-advance scroll takes. */
   advanceDuration?: number;
   /** Runs alongside the advance when the field is clicked. */
@@ -70,6 +74,7 @@ export default function VortexScene({
   advanceTo,
   splashAt: splashAtProp,
   releaseSource,
+  coverFrom,
   advanceDuration = 1100,
   onSplash,
   background = "#06070C",
@@ -113,6 +118,13 @@ export default function VortexScene({
       ro.disconnect();
     };
   }, [sections, morphSpan]);
+
+  const coverSource = useCallback(() => {
+    if (!coverFrom) return 1;
+    const el = document.getElementById(coverFrom);
+    if (!el) return 1;
+    return Math.max(0, Math.min(1, el.getBoundingClientRect().top / Math.max(window.innerHeight, 1)));
+  }, [coverFrom]);
 
   const morphSource = useCallback(() => {
     const stops = stopsRef.current;
@@ -179,6 +191,7 @@ export default function VortexScene({
             onSplash={handleSplash}
             morphSource={morphSource}
             releaseSource={releaseSource}
+            coverSource={coverSource}
             splashAt={splashAt}
             travelDepth={travelDepth}
             yieldRange={yieldRange}

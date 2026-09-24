@@ -390,8 +390,71 @@ noise rather than banding.
 | `advanceDuration` | `1100` | Milliseconds a click-advance scroll takes. |
 | `background` | `#06070C` | The ground the field is drawn against. |
 | `onSplash` | — | Fires on click; wire it to `useAdvanceScroll`. |
+| `coverFrom` | — | id of an opaque section after the scene. As it slides up over the viewport the field fades out, and once it covers the screen the field stops drawing. |
 
 Plus `density`, `color`, `accentColor` and `lineColor`, passed through.
+
+## About + Journey
+
+`AboutJourney` is a self-contained section: a curved pathway of silver
+particles with three milestones on it, an intro block, and a card for whichever
+milestone is selected. It owns its own canvas and background, so it sits
+*after* the `VortexScene` rather than inside it. Point the scene's `coverFrom`
+at it, and the shared field stops drawing once the journey fills the screen.
+
+```tsx
+<VortexScene sections={["next", "third"]} coverFrom="journey">…</VortexScene>
+<AboutJourney id="journey" index="04" />
+```
+
+Everything you would want to change lives in `app/components/journey.ts`:
+
+- `MILESTONES` is the content: label, card title, one line of body, and where
+  each marker sits on the path. **The copy for BEGINNINGS and NEXT CHAPTER is a
+  deliberately generic placeholder.** Replace it with your own; nothing there
+  claims an employer, a date or a qualification.
+- `JOURNEY` is the scene. The path is built from `strands`, which are
+  Catmull-Rom centrelines with per-point width, thickness, density, glow, bank,
+  and the position of the bright inner stream across the band. The control
+  points were placed on screen and cast back onto the ground, so moving one
+  moves the silhouette directly. The same object holds the particle budget per
+  layer, the flow speed, parallax, pointer strength, fog, and the figure's
+  position.
+
+The intro copy, the section number and the fonts are props:
+
+| `AboutJourney` prop | Default | What it does |
+| --- | --- | --- |
+| `id` | `"journey"` | Section id; also prefixes the heading and card ids. |
+| `index` | `"02"` | The number before the kicker label. |
+| `label` / `heading` / `body` | the reference copy | Intro text. `heading` and `body` take JSX, so use `<br />` to break a line. |
+| `milestones` | `MILESTONES` | The milestones, in path order. |
+| `initial` | `"experience"` | id of the milestone selected on load. |
+| `config` | `JOURNEY` | Scene configuration. |
+| `scrollHint` | `"SCROLL TO EXPLORE"` | Text at the lower left; `""` hides it. |
+
+**How it is drawn.** The centreline is sampled once on the CPU into a small
+float texture of frames: position, across, up, tangent, width and glow per
+sample. Every particle is just a strand, a position along it, and an offset
+across and above it. The vertex shader reads the frame at that position, so
+the whole field drifts along the path on the GPU. Five layers share the
+buffer: the surface, the brighter inner stream, scatter off the edges, soft
+foreground bokeh, and a thin dust. Markers, the figure and the cards are HTML,
+positioned each frame by projecting their 3D anchors. Cards are clamped
+inside the viewport.
+
+**Interaction.** Click or tap a marker to select it. The markers are a single
+tab stop; the arrow keys, Home and End move between them. Hovering or
+focusing a marker brightens its stretch of the path. The pointer gently parts
+the particles near it, but not over the text or the controls. Below 820px the
+intro sits above the scene, and the card and a row of tabs sit below it.
+
+**Behaviour.** The section reveals itself once as it enters, and it never pins
+the scroll. Reduced motion stops the flow, the parallax and the parting. DPR is
+capped at `maxDpr`, and frame time drives a particle budget that sheds points
+on a slow GPU. The loop pauses off-screen and in background tabs, and the GL
+context is released on unmount. Without WebGL2 the markers fall back to fixed
+positions over a static gradient, and all the content is still there.
 
 ## Props
 

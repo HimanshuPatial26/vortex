@@ -656,6 +656,9 @@ export interface ParticleVortexProps {
    *  vitrine separates in depth, expands and fades; the spin slows; the field
    *  hands over. Omit and the hero behaves exactly as before. */
   releaseSource?: () => number;
+  /** 1 while the field is visible, 0 once something opaque has covered the
+   *  screen. Read once per frame; at zero the field stops drawing at all. */
+  coverSource?: () => number;
   /** Draw the eclipse ring at the centre of the terrain. */
   showRing?: boolean;
   /** Morph range over which this field hands the frame to something else and
@@ -697,6 +700,7 @@ export default function ParticleVortex({
   morph = 0,
   morphSource,
   releaseSource,
+  coverSource,
   splashAt,
   showRing = true,
   yieldRange = null,
@@ -712,14 +716,14 @@ export default function ParticleVortex({
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
-    morph, morphSource, releaseSource, showRing, spectrumStrength, splashAt,
+    morph, morphSource, releaseSource, coverSource, showRing, spectrumStrength, splashAt,
     travelOnSplash, travelDepth, travelFov, yieldRange,
   });
   propsRef.current = {
     color, accentColor, lineColor, flowSpeed, spinSpeed, turbulence,
     brightness, opacity, parallaxStrength, repelStrength, showVitrine, clickPulse,
     splashOnClick, splashStrength, splashDuration, onSplash,
-    morph, morphSource, releaseSource, showRing, spectrumStrength, splashAt,
+    morph, morphSource, releaseSource, coverSource, showRing, spectrumStrength, splashAt,
     travelOnSplash, travelDepth, travelFov, yieldRange,
   };
 
@@ -1072,6 +1076,7 @@ export default function ParticleVortex({
          fields are scattered particles by then, so the two burst states read as
          one and the handover has nothing recognisable to give it away. */
       const releaseFade = 1 - Math.min(1, Math.max(0, (release - 0.08) / 0.24));
+      const cover = p.coverSource ? Math.max(0, Math.min(1, p.coverSource())) : 1;
       lines.scale.set(1 + release * 0.9, 1 + release * 0.26, 1 + release * 1.7);
       (pointProgram.uniforms.uSpin.value as number) = p.spinSpeed * (1 - Math.min(1, release / 0.2) * 0.82);
       (pointProgram.uniforms.uFlow.value as number) = p.flowSpeed * (1 - Math.min(1, release / 0.2) * 0.6);
@@ -1178,7 +1183,7 @@ export default function ParticleVortex({
       lu.uPulse.value = pulse;
       // The cage belongs to the hero; it has no business around a landscape.
       lu.uOpacity.value = (p.showVitrine ? 0.3 : 0) * Math.max(0, 1 - morphNow) * yieldFade
-        * (1 - Math.min(1, release / 0.17));
+        * (1 - Math.min(1, release / 0.17)) * cover;
       (lu.uMouse.value as Float32Array).set(mouse);
 
       pu.uMorph.value = morphNow;
@@ -1186,7 +1191,7 @@ export default function ParticleVortex({
          it back for the next form. Multiplying the two would hold it at zero
          forever, because the release only ever runs one way — so the return
          lifts it instead. */
-      pu.uOpacity.value = p.opacity * Math.min(yieldFade, Math.max(releaseFade, yieldBack));
+      pu.uOpacity.value = p.opacity * Math.min(yieldFade, Math.max(releaseFade, yieldBack)) * cover;
 
       const ru = ringProgram.uniforms as any;
       // Fades in over the back half of the morph, once there is a terrain for
@@ -1195,7 +1200,7 @@ export default function ParticleVortex({
       // take over.
       const ringIn = Math.max(0, Math.min(1, (morphNow - 0.45) / 0.55));
       const ringOut = Math.max(0, Math.min(1, (morphNow - 1.1) / 0.5));
-      ru.uMorph.value = (p.showRing ? ringIn * (1 - ringOut) : 0) * yieldFade;
+      ru.uMorph.value = (p.showRing ? ringIn * (1 - ringOut) : 0) * yieldFade * cover;
       const rc = ru.uCenter.value as Float32Array;
       rc[0] = mouse[0] * parallax * 0.05;
       rc[1] = -0.06 + mouse[1] * parallax * 0.03;
