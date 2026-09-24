@@ -12,6 +12,7 @@ import dynamic from "next/dynamic";
 import VortexScene from "./components/VortexScene";
 import HeroVortex from "./components/HeroVortex";
 import MountainHUD from "./components/MountainHUD";
+import AboutJourney from "./components/AboutJourney";
 import { color, font } from "./theme";
 import { TRANSITION, transitionProgress, unravelProgress, smoothstep } from "./components/transition";
 import { useCallback, useEffect, useRef } from "react";
@@ -86,6 +87,9 @@ export default function Page() {
       /* The upper end has to clear its own ramp before the morph axis tops
          out, or the field only ever comes half way back for the dunes. */
       yieldRange={[0.72, 1.7]}
+      /* The journey section is opaque; once it covers the screen the field
+         behind it stops drawing. */
+      coverFrom="journey"
     >
       <HeroVortex renderCanvas={false} />
 
@@ -268,6 +272,10 @@ export default function Page() {
           </div>
         </div>
       </section>
+
+      {/* Numbered to follow the dunes. The section is self-contained — it owns
+          its own canvas and reveal — so it can sit anywhere in the order. */}
+      <AboutJourney id="journey" index="04" />
     </VortexScene>
   );
 }
