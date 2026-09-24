@@ -424,8 +424,8 @@ Plus `density`, `color`, `accentColor` and `lineColor`, passed through.
 
 ### `HeroVortex`
 
-All copy is prop-driven: `eyebrow`, `headline`, `subline`, `actions`, `note`,
-`specs`, `channels`, `footerLeft`, `footerRight`. `headline` and `actions` take
+All copy is prop-driven: `eyebrow`, `headline`, `subline`, `actions`,
+`footerLeft`, `footerRight`. `headline` and `actions` take
 nodes, the rest take strings. Plus `density` (passed through), `height`
 (default `100svh`) and `style`.
 
