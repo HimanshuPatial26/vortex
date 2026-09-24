@@ -33,10 +33,6 @@ const mono: CSSProperties = {
   textShadow: "0 1px 12px rgba(0,0,0,0.95)",
 };
 
-export interface HeroSpec {
-  key: string;
-  value: string;
-}
 
 export interface HeroVortexProps {
   /** Small mono label above the headline. */
@@ -47,12 +43,6 @@ export interface HeroVortexProps {
   subline?: string;
   /** Call-to-action buttons rendered under the subline. */
   actions?: ReactNode;
-  /** Paragraph in the top-left HUD block. */
-  note?: string;
-  /** Key/value readout under the top-left paragraph. */
-  specs?: HeroSpec[];
-  /** Right-hand HUD lines, top to bottom. */
-  channels?: string[];
   /** Bottom-left and bottom-right footer captions. */
   footerLeft?: string;
   footerRight?: string;
@@ -82,57 +72,6 @@ export interface HeroVortexProps {
   style?: CSSProperties;
 }
 
-/* The dot matrix in the lower-left of the reference: a plain lattice whose
-   opacity falls off from the top-left, so it reads as a fading readout. */
-const DotMatrix = ({ cols = 6, rows = 11 }: { cols?: number; rows?: number }) => (
-  <div
-    aria-hidden
-    style={{
-      display: "grid",
-      gridTemplateColumns: `repeat(${cols}, 7px)`,
-      gap: "5px 0",
-      marginTop: 18,
-    }}
-  >
-    {Array.from({ length: cols * rows }, (_, i) => {
-      const x = i % cols;
-      const y = Math.floor(i / cols);
-      // Deterministic thinning — keeps SSR and client markup identical.
-      const on = (x * 7 + y * 13 + ((x * y) % 5)) % 4 !== 0;
-      const fade = 1 - (x / cols) * 0.45 - (y / rows) * 0.5;
-      return (
-        <span
-          key={i}
-          style={{
-            width: 2.5,
-            height: 2.5,
-            borderRadius: "50%",
-            background: color.text,
-            opacity: on ? Math.max(0.06, fade * 0.5) : 0.05,
-          }}
-        />
-      );
-    })}
-  </div>
-);
-
-const DotColumn = ({ n = 9 }: { n?: number }) => (
-  <div aria-hidden style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, marginTop: 16 }}>
-    {Array.from({ length: n }, (_, i) => (
-      <span
-        key={i}
-        style={{
-          width: 2.5,
-          height: 2.5,
-          borderRadius: "50%",
-          background: color.text,
-          opacity: Math.max(0.08, 0.42 - i * 0.04),
-        }}
-      />
-    ))}
-  </div>
-);
-
 export default function HeroVortex({
   eyebrow = "PARTICLE VORTEX",
   headline = (
@@ -144,14 +83,6 @@ export default function HeroVortex({
   ),
   subline = "A GPU-resident lattice streamed through a noise volume. Move the cursor to part it; click anywhere to burst it and read on.",
   actions,
-  note = "A live particle field: a cylindrical lattice streamed through a noise volume, flared at the mouth and dispersed at the base. Rendered on the GPU in a single draw call.",
-  specs = [
-    { key: "FIELD", value: "LATTICE / CYLINDRICAL" },
-    { key: "SHADING", value: "ADDITIVE" },
-    { key: "INPUT", value: "POINTER + PRESS" },
-    { key: "FRAME", value: "5 SHELL VITRINE" },
-  ],
-  channels = ["SIGNAL / STABLE", "DRIFT / CONTINUOUS", "RESPONSE / REALTIME"],
   footerLeft = "HERO SYSTEM — PARTICLE VORTEX",
   footerRight = "CLICK THE FIELD TO CONTINUE ↓",
   density = "medium",
@@ -240,60 +171,6 @@ export default function HeroVortex({
           pointerEvents: "none",
         }}
       />
-
-      {/* ── HUD: top-left ── */}
-      <div
-        aria-hidden
-        className="hv-hud hv-hud-tl"
-        style={{
-          ...mono,
-          position: "absolute",
-          top: "clamp(18px, 3vh, 34px)",
-          left: "clamp(16px, 2.6vw, 34px)",
-          maxWidth: 190,
-          color: color.textMono,
-          pointerEvents: "none",
-        }}
-      >
-        <div style={{ color: color.textFaint, marginBottom: 12 }}>{eyebrow} / VISUAL SYSTEM</div>
-        <p style={{ margin: 0, textTransform: "none", letterSpacing: "0.03em", fontSize: 8.5, lineHeight: 1.85, color: color.textMono }}>
-          {note}
-        </p>
-        <div style={{ marginTop: 20, display: "grid", gap: 2 }}>
-          {specs.map((s) => (
-            <div key={s.key} style={{ display: "flex", gap: 8 }}>
-              <span style={{ color: color.textMono2, minWidth: 52 }}>{s.key}</span>
-              <span style={{ color: color.textFaint }}>{s.value}</span>
-            </div>
-          ))}
-        </div>
-        <DotMatrix />
-      </div>
-
-      {/* ── HUD: top-right ── */}
-      <div
-        aria-hidden
-        className="hv-hud hv-hud-tr"
-        style={{
-          ...mono,
-          position: "absolute",
-          top: "clamp(18px, 3vh, 34px)",
-          right: "clamp(16px, 2.6vw, 34px)",
-          textAlign: "right",
-          // Lighter than its left-hand counterpart: this block sits inside the
-          // lit wedge, where textMono matches the ground the rays lift it to.
-          color: color.textFaint,
-          pointerEvents: "none",
-        }}
-      >
-        <div style={{ color: color.textDim, marginBottom: 14 }}>REALTIME / WEBGL</div>
-        <div style={{ display: "grid", gap: 6 }}>
-          {channels.map((c) => (
-            <div key={c}>{c}</div>
-          ))}
-        </div>
-        <DotColumn />
-      </div>
 
       {/* ── Hero copy ── */}
       <div
