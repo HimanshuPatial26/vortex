@@ -398,13 +398,23 @@ Plus `density`, `color`, `accentColor` and `lineColor`, passed through.
 
 `AboutJourney` is a self-contained section: a curved pathway of silver
 particles with three milestones on it, an intro block, and a card for whichever
-milestone is selected. It owns its own canvas and background, so it sits
-*after* the `VortexScene` rather than inside it. Point the scene's `coverFrom`
-at it, and the shared field stops drawing once the journey fills the screen.
+milestone is selected. It owns its own canvas and an opaque background. It sits
+inside the `VortexScene`, after the transparent sections. Point the scene's
+`coverFrom` at it, and the shared field stops drawing once the journey fills
+the screen.
+
+The shared field listens for presses on the whole window and scrolls to its
+next stop on any press that isn't on a control. Wrap opaque sections in
+`data-no-splash` so presses there stay with them:
 
 ```tsx
-<VortexScene sections={["next", "third"]} coverFrom="journey">…</VortexScene>
-<AboutJourney id="journey" index="04" />
+<VortexScene sections={["rest", "third"]} coverFrom="journey">
+  …
+  <div data-no-splash>
+    <AboutJourney id="journey" index="04" />
+    <GatewayFlow id="gateway" index="05" />
+  </div>
+</VortexScene>
 ```
 
 Everything you would want to change lives in `app/components/journey.ts`:
@@ -455,6 +465,47 @@ capped at `maxDpr`, and frame time drives a particle budget that sheds points
 on a slow GPU. The loop pauses off-screen and in background tabs, and the GL
 context is released on unmount. Without WebGL2 the markers fall back to fixed
 positions over a static gradient, and all the content is still there.
+
+## Gateway Flow
+
+`GatewayFlow` is the closing section. Its background is the Gateway Flow
+variant of ThreeUI's Constellation Field (MIT, by Meng To), ported from the
+authored Canvas 2D source in `app/components/gatewayFlow.ts`: eighty dotted
+bezier streams, alternating from the left and right edges and converging on
+the centre, with one square particle riding each. A click sends a shockwave
+ring through the particles.
+
+Every drawing constant is the source's own. Only the host boundary changed:
+
+- It draws into a canvas sized to the section, not the window, and takes clicks
+  on the section only.
+- Motion is timed against the 60fps the source assumed, so a 120Hz screen
+  doesn't run it twice as fast.
+- Stream heights are kept as fractions of the canvas height, so a resize keeps
+  the composition.
+- It pauses offscreen and in background tabs, and draws one still frame under
+  reduced motion.
+- It survives the browser dropping its 2D context.
+- The source's 2px dither covers the section instead of the whole page, and it
+  fades in at the top so the join with the section above is soft.
+
+The reference demo puts a login form on the card. A portfolio has nothing to
+sign in to, so the card keeps the demo's styling but carries a closing line and
+one action instead: the hairline border that turns into a moving highlight on
+hover, and the title words rising out of a mask. **The card copy is a
+placeholder.** By default the button scrolls back to the top; give it an `href`
+to make it a link.
+
+| `GatewayFlow` prop | Default | What it does |
+| --- | --- | --- |
+| `index` / `label` | `"05"` / `"GATEWAY"` | The kicker at the top left. |
+| `title` | `["Every", "path", "converges."]` | One entry per word; each rises on its own. |
+| `body` | placeholder | The line under the title. |
+| `action` | `{ label: "Back to the start" }` | The button. With `href` it renders as a link. |
+| `hint` | `"TAP OR CLICK TO SEND A PULSE"` | The line under the card; `""` hides it. Hidden under reduced motion. |
+| `speed`, `density`, `size`, `strokeWidth`, `opacity` | `1` | Multipliers on the authored values. `density` scales the 80 streams. |
+| `mode` | `"dark"` | `"light"` draws black on white. |
+| `background` | `color.ink` | The ground behind the field. |
 
 ## Props
 

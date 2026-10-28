@@ -13,6 +13,7 @@ import VortexScene from "./components/VortexScene";
 import HeroVortex from "./components/HeroVortex";
 import MountainHUD from "./components/MountainHUD";
 import AboutJourney from "./components/AboutJourney";
+import GatewayFlow from "./components/GatewayFlow";
 import { color, font } from "./theme";
 import { TRANSITION, transitionProgress, unravelProgress, smoothstep } from "./components/transition";
 import { useCallback, useEffect, useRef } from "react";
@@ -273,9 +274,18 @@ export default function Page() {
         </div>
       </section>
 
-      {/* Numbered to follow the dunes. The section is self-contained — it owns
-          its own canvas and reveal — so it can sit anywhere in the order. */}
-      <AboutJourney id="journey" index="04" />
+      {/* The opaque sections. The shared field listens for presses on the whole
+          window and scrolls to its next stop on any that is not a control;
+          data-no-splash keeps presses down here for these sections' own use. */}
+      <div data-no-splash>
+        {/* Numbered to follow the dunes. The section is self-contained — it
+            owns its own canvas and reveal — so it can sit anywhere in the order. */}
+        <AboutJourney id="journey" index="04" />
+
+        {/* Closing section on the Gateway Flow field; clicks there send a
+            pulse through the streams. */}
+        <GatewayFlow id="gateway" index="05" />
+      </div>
     </VortexScene>
   );
 }

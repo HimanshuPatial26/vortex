@@ -74,7 +74,13 @@ body { margin: 0; background: #06070C; }
   overflow: hidden;
   isolation: isolate;
 }
-.aj-stage { position: absolute; inset: 0; }
+.aj-stage {
+  position: absolute; inset: 0;
+  /* The ribbon runs off the bottom of the frame; fade it out there so the
+     section that follows does not meet a hard edge. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  mask-image: linear-gradient(to bottom, #000 82%, transparent);
+}
 .aj-canvas { position: absolute; inset: 0; }
 .aj-glow {
   position: absolute; left: 0; top: 0;
@@ -283,4 +289,187 @@ body { margin: 0; background: #06070C; }
 
 @media (prefers-reduced-motion: reduce) {
   .aj-intro { transform: none; }
+}
+
+/* ── GatewayFlow ─────────────────────────────────────────────────────────
+   Values are the reference's Tailwind classes, written out. */
+.gf {
+  position: relative;
+  min-height: 100svh;
+  overflow: hidden;
+  background: var(--gf-bg);
+  color: #cbd5e1;
+  isolation: isolate;
+}
+.gf-field {
+  position: absolute; inset: 0; z-index: 0;
+  /* Streams ease in from the top edge rather than starting at a cut. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%);
+  mask-image: linear-gradient(to bottom, transparent, #000 12%);
+}
+.gf-vignette {
+  position: absolute; inset: 0; opacity: 0.1;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.01) 0%, rgba(0, 0, 0, 0) 80%);
+}
+.gf-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; display: block; }
+
+/* The source lays this over the whole page. Here it covers the section and
+   fades in from the top edge, so the section joins the one above without a
+   step in tone. */
+.gf-dither {
+  position: absolute; inset: 0; z-index: 5;
+  pointer-events: none;
+  opacity: 0.15;
+  background-image: url("data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%202%202%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%23ffffff%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%221%22%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%23ffffff%22%2F%3E%3C%2Fsvg%3E");
+  background-size: 2px 2px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22%);
+  mask-image: linear-gradient(to bottom, transparent, #000 22%);
+}
+
+.gf-main {
+  position: relative; z-index: 3;
+  min-height: 100svh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 48px 24px;
+  box-sizing: border-box;
+}
+.gf-kicker {
+  position: absolute; left: clamp(20px, 5vw, 48px); top: clamp(40px, 7vh, 76px);
+  font: 400 9px/1 var(--gf-mono);
+  letter-spacing: 0.14em;
+  color: #7C859B;
+}
+
+/* Hairline that hands over to a moving highlight on hover. */
+.gf-edge {
+  position: absolute; inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: inherit;
+  pointer-events: none;
+  transition: border-color 0.5s;
+}
+.gf-glint {
+  position: absolute; inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(110deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  -webkit-mask-image: linear-gradient(#fff 0 0), linear-gradient(#fff 0 0);
+  -webkit-mask-clip: content-box, border-box;
+  -webkit-mask-composite: xor;
+  mask-image: linear-gradient(#fff 0 0), linear-gradient(#fff 0 0);
+  mask-clip: content-box, border-box;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s;
+  z-index: 1;
+}
+
+.gf-card {
+  position: relative;
+  width: 100%; max-width: 28rem;
+  box-sizing: border-box;
+  padding: 28px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.95);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex; flex-direction: column;
+}
+.gf-card:hover > .gf-edge { border-color: transparent; }
+.gf-card:hover > .gf-glint { opacity: 1; }
+@media (min-width: 768px) { .gf-card { padding: 32px; } }
+
+.gf-head { position: relative; z-index: 2; text-align: center; margin-bottom: 32px; }
+.gf-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 48px; height: 48px;
+  margin-bottom: 24px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+  color: #e2e8f0;
+}
+.gf-title {
+  display: flex; flex-wrap: wrap; justify-content: center; column-gap: 8px;
+  margin: 0 0 12px;
+  font-family: var(--gf-display);
+  font-weight: 100;
+  font-size: 30px; line-height: 1.25;
+  letter-spacing: -0.025em;
+  text-transform: uppercase;
+  color: #fff;
+}
+@media (min-width: 768px) { .gf-title { font-size: 36px; } }
+.gf-mask { display: inline-block; overflow: hidden; padding-top: 4px; }
+.gf-word {
+  display: inline-block;
+  transform: translateY(120%);
+  /* GSAP's power4.out */
+  transition: transform 1.2s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.gf-in .gf-word { transform: none; }
+.gf-body {
+  margin: 0;
+  font: 200 14px/1.625 var(--gf-display);
+  color: #64748b;
+}
+
+.gf-btn {
+  position: relative; z-index: 2;
+  display: block; width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 10px 0;
+  border: 0; border-radius: 8px;
+  background: #0a0a0a;
+  color: #fff;
+  font: 300 14px/20px var(--gf-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.03);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.gf-btn > .gf-edge { border-color: rgba(255, 255, 255, 0.1); transition-duration: 0.3s; }
+.gf-btn > .gf-glint {
+  background: linear-gradient(110deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  transition-duration: 0.3s;
+}
+.gf-btn:hover { background: #111; box-shadow: 0 0 25px rgba(255, 255, 255, 0.06); }
+.gf-btn:hover > .gf-edge { border-color: transparent; }
+.gf-btn:hover > .gf-glint,
+.gf-btn:focus-visible > .gf-glint { opacity: 1; }
+.gf-btn:focus-visible { outline: 1px solid rgba(255, 255, 255, 0.5); outline-offset: 3px; }
+.gf-btn-label { position: relative; z-index: 2; }
+
+.gf-hint {
+  position: relative; z-index: 2;
+  margin: 32px 0 0;
+  font: 200 12px/16px var(--gf-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #475569;
+  text-align: center;
+}
+
+/* Light mode: the same surfaces, inverted. */
+.gf-light { color: #334155; }
+.gf-light .gf-card { background: rgba(255, 255, 255, 0.95); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.12); }
+.gf-light .gf-edge { border-color: rgba(0, 0, 0, 0.08); }
+.gf-light .gf-glint { background: linear-gradient(110deg, transparent, rgba(0, 0, 0, 0.18), transparent); }
+.gf-light .gf-icon { background: rgba(255, 255, 255, 0.6); border-color: rgba(203, 213, 225, 0.8); color: #1e293b; }
+.gf-light .gf-title { color: #0f172a; }
+.gf-light .gf-btn { background: #f5f5f5; color: #0f172a; box-shadow: 0 0 20px rgba(0, 0, 0, 0.04); }
+.gf-light .gf-btn:hover { background: #ececec; }
+.gf-light .gf-dither { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gf-word { transform: none; transition: none; }
+  /* Clicks do nothing without motion, so don't invite them. */
+  .gf-hint { display: none; }
 }
