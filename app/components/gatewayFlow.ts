@@ -127,7 +127,7 @@ export function createGatewayFlow(
 
   /** One frame. `k` is elapsed time in source frames; 0 draws in place. */
   function draw(k: number) {
-    if (!ctx || width === 0 || height === 0) return;
+    if (!ctx || width === 0 || height === 0 || ctx.isContextLost?.()) return;
     ctx.clearRect(0, 0, width, height);
     const centerX = width / 2;
     const centerY = height / 2;
@@ -204,11 +204,14 @@ export function createGatewayFlow(
     raf = 0;
   }
 
-  /* A 2D context can be dropped by the browser under memory pressure. Hold
-     the loop until it comes back, then restore the transform it lost. */
+  /* A 2D context is dropped when the GPU resets — a driver hiccup, or a heavy
+     WebGL scene elsewhere on the page. Hold the loop until it comes back, then
+     restore the transform it lost.
+
+     Unlike WebGL, a 2D context is restored only if the "contextlost" event is
+     NOT cancelled: calling preventDefault() here would leave it blank for good. */
   let wasRunning = false;
-  const onLost = (e: Event) => {
-    e.preventDefault();
+  const onLost = () => {
     wasRunning = raf !== 0;
     stop();
   };
