@@ -11,7 +11,7 @@
 
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createGatewayFlow, type GatewayFlowOptions } from "./gatewayFlow";
 import { color, font } from "../theme";
 
@@ -61,6 +61,9 @@ export default function GatewayFlow({
   const sectionRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  /* Bumped to replace the canvas when the browser loses its context and does
+     not give it back; a new element gets a new context. */
+  const [canvasEpoch, setCanvasEpoch] = useState(0);
 
   useEffect(() => {
     const section = sectionRef.current;
@@ -85,8 +88,9 @@ export default function GatewayFlow({
       else flow.stop();
     };
 
-    const io = new IntersectionObserver(([e]) => {
-      visible = e.isIntersecting;
+    // A batch can hold several crossings for the section; only the last is current.
+    const io = new IntersectionObserver((entries) => {
+      visible = entries[entries.length - 1].isIntersecting;
       sync();
     });
     io.observe(section);
@@ -103,16 +107,33 @@ export default function GatewayFlow({
     };
     section.addEventListener("click", onClick);
 
+    /* The browser normally restores a lost context by itself. If it has not
+       within a couple of seconds, start over on a fresh canvas — a few times
+       at most, so a GPU that keeps failing doesn't spin. */
+    let lostTimer = 0;
+    const onLost = () => {
+      window.clearTimeout(lostTimer);
+      lostTimer = window.setTimeout(() => {
+        setCanvasEpoch((n) => (n < 3 ? n + 1 : n));
+      }, 2000);
+    };
+    const onRestored = () => window.clearTimeout(lostTimer);
+    canvas.addEventListener("contextlost", onLost);
+    canvas.addEventListener("contextrestored", onRestored);
+
     sync();
 
     return () => {
+      window.clearTimeout(lostTimer);
+      canvas.removeEventListener("contextlost", onLost);
+      canvas.removeEventListener("contextrestored", onRestored);
       io.disconnect();
       ro.disconnect();
       document.removeEventListener("visibilitychange", sync);
       section.removeEventListener("click", onClick);
       flow.destroy();
     };
-  }, [speed, density, size, strokeWidth, opacity, mode]);
+  }, [speed, density, size, strokeWidth, opacity, mode, canvasEpoch]);
 
   /* The title's masked reveal, once, as it enters (the source's ScrollTrigger
      at "top 95%"). */
@@ -160,7 +181,7 @@ export default function GatewayFlow({
     >
       <div className="gf-field" aria-hidden>
         <div className="gf-vignette" />
-        <canvas ref={canvasRef} className="gf-canvas" />
+        <canvas key={canvasEpoch} ref={canvasRef} className="gf-canvas" />
       </div>
 
       <div className="gf-main">
