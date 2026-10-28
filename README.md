@@ -470,7 +470,7 @@ positions over a static gradient, and all the content is still there.
 
 `GatewayFlow` is the closing section. Its background is the Gateway Flow
 variant of ThreeUI's Constellation Field (MIT, by Meng To), ported from the
-authored Canvas 2D source in `app/components/gatewayFlow.ts`: eighty dotted
+authored Canvas 2D source in `app/components/gatewayFlowRenderer.ts`: eighty dotted
 bezier streams, alternating from the left and right edges and converging on
 the centre, with one square particle riding each. A click sends a shockwave
 ring through the particles.

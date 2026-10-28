@@ -1,6 +1,6 @@
 /* GatewayFlow — a closing section on the Gateway Flow constellation field.
 
-   The background is the authored renderer in gatewayFlow.ts, untouched apart
+   The background is the authored renderer in gatewayFlowRenderer.ts, untouched apart
    from its host boundary. The card follows the reference's styling: a near-
    opaque panel with a hairline border that turns into a moving highlight on
    hover, and a title whose words rise out of a mask as it enters.
@@ -12,7 +12,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createGatewayFlow, type GatewayFlowOptions } from "./gatewayFlow";
+import { createGatewayFlow, type GatewayFlowOptions } from "./gatewayFlowRenderer";
 import { color, font } from "../theme";
 
 export interface GatewayFlowProps extends GatewayFlowOptions {
